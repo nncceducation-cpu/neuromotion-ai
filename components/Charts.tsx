@@ -21,7 +21,7 @@ export const PhaseSpaceChart: React.FC<ChartProps> = ({ data }) => {
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
             <XAxis type="number" dataKey="phase_x" name="Position" hide domain={['dataMin', 'dataMax']} />
             <YAxis type="number" dataKey="phase_v" name="Velocity" hide domain={['dataMin', 'dataMax']} />
-            <ZAxis type="number" range={[20]} />
+            <ZAxis type="number" range={[20, 20]} />
             <Tooltip 
               cursor={{ strokeDasharray: '3 3' }}
               content={({ active, payload }) => {

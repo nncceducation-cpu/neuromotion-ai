@@ -3,11 +3,13 @@ import { PipelineStage, StageConfig, ClinicalProfile, SkeletonFrame, Point3D } f
 
 export const STAGES: StageConfig[] = [
   { id: PipelineStage.INGESTION, label: "Ingestion", icon: "fa-video", description: "Video upload and preprocessing" },
-  { id: PipelineStage.LIFTING_3D, label: "3D Lifting", icon: "fa-cube", description: "MediaPipe Holistic 3D pose extraction" },
+  { id: PipelineStage.LIFTING_3D, label: "ViTPose 3D", icon: "fa-cube", description: "ViTPose Transformer (SOTA) Pose Estimation" },
   { id: PipelineStage.MOVEMENT_LAB, label: "Movement Lab", icon: "fa-flask", description: "Entropy, Fluency & Complexity analysis" },
   { id: PipelineStage.CLASSIFIER, label: "Diagnose", icon: "fa-user-md", description: "Hybrid Transformer-GCN Classification" },
   { id: PipelineStage.COMPLETE, label: "Results", icon: "fa-clipboard-check", description: "Clinical assessment report" }
 ];
+
+export const SERVER_URL = "http://localhost:8000";
 
 // --- DETERMINISTIC RANDOM (PRNG) ---
 let _seed = 123456;
@@ -301,8 +303,6 @@ export const CLINICAL_PROFILES: ClinicalProfile[] = [
 ];
 
 export const getProfileBySeed = (seed: number): ClinicalProfile => {
-  // Deterministic profile selection based on seed
-  // Use a localized PRNG calc so we don't mess up the global stream just for selection if we don't want to
   const localVal = (seed * 9301 + 49297) % 233280;
   const normalized = localVal / 233280;
   
@@ -314,8 +314,6 @@ export const getProfileBySeed = (seed: number): ClinicalProfile => {
 };
 
 export const getRandomProfile = (): ClinicalProfile => {
-  // For LIVE mode or fallback, we can still use Random
-  // But let's use seededRandom if we want consistency in session, or Math.random if truly random
   const rand = Math.random();
   if (rand < 0.25) return CLINICAL_PROFILES[0]; 
   if (rand < 0.45) return CLINICAL_PROFILES[1]; 

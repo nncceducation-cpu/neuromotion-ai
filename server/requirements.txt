@@ -1,0 +1,12 @@
+
+fastapi
+uvicorn
+numpy
+scipy
+opencv-python-headless
+google-genai
+python-multipart
+# torch --index-url https://download.pytorch.org/whl/cu118
+# openmim
+# mmpose
+# mmengine

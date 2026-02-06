@@ -553,18 +553,18 @@ const App: React.FC = () => {
       <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm no-print">
          <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('dashboard')}>
-                <div className="bg-sky-500 w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold shadow-sky-200 shadow-lg">N</div>
+                <div className="bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">N</div>
                 <span className="font-bold text-lg tracking-tight text-slate-800">NeuroMotion AI</span>
             </div>
             <div className="flex items-center gap-4">
                <button 
                   onClick={() => setUseBackend(!useBackend)}
-                  className={`text-xs px-3 py-1 rounded-full font-bold border flex items-center transition-all ${useBackend ? 'bg-emerald-100 text-emerald-700 border-emerald-300 shadow-emerald-200 shadow-md' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                  className={`text-xs px-3 py-1 rounded-full font-bold border flex items-center transition-all ${useBackend ? 'bg-slate-200 text-slate-700 border-slate-300 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
                >
                    <i className={`fas ${useBackend ? 'fa-server' : 'fa-laptop'} mr-2`}></i>
                    {useBackend ? 'Server Mode (ViTPose)' : 'Local Mode (Browser)'}
                </button>
-               {appMode === 'training' && ( <div className="bg-indigo-600 text-white text-xs px-3 py-1 rounded-full font-bold flex items-center shadow-lg shadow-indigo-200"><i className="fas fa-graduation-cap mr-2"></i> Training Mode Active</div> )}
+               {appMode === 'training' && ( <div className="bg-slate-700 text-white text-xs px-3 py-1 rounded-full font-bold flex items-center shadow-sm"><i className="fas fa-graduation-cap mr-2"></i> Training Mode Active</div> )}
                <div className="flex items-center gap-2">
                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-sm font-bold">{user.name.charAt(0)}</div>
                    <span className="text-sm font-medium hidden md:block">{user.name}</span>
@@ -581,15 +581,15 @@ const App: React.FC = () => {
              <div className="animate-fade-in">
                 <div className="mb-6 flex items-center justify-between no-print">
                     <button onClick={() => setView('dashboard')} className="text-slate-500 hover:text-slate-800 flex items-center gap-2 transition-colors"><i className="fas fa-arrow-left"></i> Back to Dashboard</button>
-                    {appMode === 'training' && ( <div className="text-sm text-indigo-600 font-bold">Step 1: Upload & Diagnose (Expert) -> Step 2: AI Analysis & Optimization</div> )}
+                    {appMode === 'training' && ( <div className="text-sm text-slate-600 font-bold">Step 1: Upload & Diagnose (Expert) -> Step 2: AI Analysis & Optimization</div> )}
                 </div>
                 {appMode === 'training' && stage === PipelineStage.INGESTION && (
-                    <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 mb-8">
-                        <h3 className="text-indigo-900 font-bold mb-4 flex items-center"><i className="fas fa-clipboard-check mr-2"></i> Expert Ground Truth Input</h3>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 mb-8">
+                        <h3 className="text-slate-800 font-bold mb-4 flex items-center"><i className="fas fa-clipboard-check mr-2"></i> Expert Ground Truth Input</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-bold uppercase text-indigo-800 mb-1">Diagnosis</label>
-                                <select className="w-full p-2 rounded border border-indigo-200" onChange={(e) => setSelectedExpertDiagnosis(e.target.value)}>
+                                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Diagnosis</label>
+                                <select className="w-full p-2 rounded border border-slate-200" onChange={(e) => setSelectedExpertDiagnosis(e.target.value)}>
                                     <option value="">Select Diagnosis...</option>
                                     <option value="Normal">Normal</option>
                                     <option value="Sarnat Stage I">Sarnat Stage I</option>
@@ -599,8 +599,8 @@ const App: React.FC = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-bold uppercase text-indigo-800 mb-1">Notes</label>
-                                <input className="w-full p-2 rounded border border-indigo-200" placeholder="E.g. High frequency tremor noted..." onChange={(e) => setExpertAnnotation(e.target.value)} />
+                                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Notes</label>
+                                <input className="w-full p-2 rounded border border-slate-200" placeholder="E.g. High frequency tremor noted..." onChange={(e) => setExpertAnnotation(e.target.value)} />
                             </div>
                         </div>
                     </div>
@@ -615,17 +615,17 @@ const App: React.FC = () => {
                                 {stage === PipelineStage.INGESTION && !videoPreview && !isLive && (
                                     <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-slate-900/50">
                                         <i className="fas fa-cloud-upload-alt text-5xl mb-4 opacity-80"></i>
-                                        <label className="bg-sky-500 hover:bg-sky-400 px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
+                                        <label className="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-sm">
                                             Select Video File
                                             <input type="file" className="hidden" accept="video/*" onChange={handleFileUpload} />
                                         </label>
                                         <p className="mt-4 text-sm opacity-60">Supported formats: MP4, MOV, WEBM</p>
-                                        {useBackend && <div className="mt-2 text-xs text-emerald-300 font-mono">Server Mode Active (ViTPose)</div>}
+                                        {useBackend && <div className="mt-2 text-xs text-slate-400 font-mono">Server Mode Active (ViTPose)</div>}
                                     </div>
                                 )}
                             </div>
                             {stage === PipelineStage.INGESTION && (videoPreview || isLive) && (
-                                <button onClick={runAnalysis} className="w-full py-4 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-lg shadow-xl shadow-sky-900/20 transition-all transform active:scale-95 flex items-center justify-center gap-3">
+                                <button onClick={runAnalysis} className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-lg shadow-md transition-all transform active:scale-95 flex items-center justify-center gap-3">
                                     {isCapturing ? ( <><i className="fas fa-circle-notch fa-spin"></i> Analyzing ({useBackend ? 'Server' : 'Local'})...</> ) : ( <><i className="fas fa-play"></i> Run Clinical Analysis</> )}
                                 </button>
                             )}
@@ -645,12 +645,12 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <h3 className="text-xl font-bold text-slate-800"><i className="fas fa-brain text-purple-600 mr-2"></i> {trainingStatus === 'complete' ? 'Optimization Complete' : 'Expert Training'}</h3>
+                    <h3 className="text-xl font-bold text-slate-800"><i className="fas fa-brain text-slate-500 mr-2"></i> {trainingStatus === 'complete' ? 'Optimization Complete' : 'Expert Training'}</h3>
                     <button onClick={closeTrainingModal} className="text-slate-400 hover:text-slate-600"><i className="fas fa-times"></i></button>
                 </div>
                 <div className="p-6">
                     {trainingStatus === 'analyzing' ? (
-                        <div className="text-center py-12"><i className="fas fa-microchip text-4xl text-sky-500 animate-bounce mb-4"></i><h4 className="text-lg font-bold text-slate-700">Refining Physics Engine...</h4><p className="text-slate-500">The AI is adjusting signal thresholds based on your feedback.</p></div>
+                        <div className="text-center py-12"><i className="fas fa-microchip text-4xl text-slate-400 mb-4"></i><h4 className="text-lg font-bold text-slate-700">Refining Physics Engine...</h4><p className="text-slate-500">The AI is adjusting signal thresholds based on your feedback.</p></div>
                     ) : trainingStatus === 'complete' && prevConfig && motionConfig ? (
                         <div className="space-y-6">
                             <div className="bg-green-50 text-green-800 p-4 rounded-lg flex items-start gap-3"><i className="fas fa-check-circle mt-1 text-green-600"></i><div><h4 className="font-bold">Algorithm Updated</h4><p className="text-sm">New parameters have been saved to memory.</p></div></div>
@@ -665,7 +665,7 @@ const App: React.FC = () => {
             </div>
         </div>
       )}
-      {error && ( <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 z-[200] animate-bounce"><i className="fas fa-exclamation-circle"></i>{error}<button onClick={() => setError(null)} className="ml-2 opacity-80 hover:opacity-100"><i className="fas fa-times"></i></button></div> )}
+      {error && ( <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-3 z-[200]"><i className="fas fa-exclamation-circle"></i>{error}<button onClick={() => setError(null)} className="ml-2 opacity-80 hover:opacity-100"><i className="fas fa-times"></i></button></div> )}
     </div>
   );
 };

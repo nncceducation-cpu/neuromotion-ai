@@ -1,34 +1,39 @@
+import sys
+import os
+
+# 1. SETUP PATH: Add the current directory to sys.path so we can import 'physics_engine'
+# This fixes the "ModuleNotFoundError" whether running via uvicorn or python directly.
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import json
-import os
 import time
+import numpy as np
 
-# Physics Engine Port
-from .physics_engine import process_frames
+# 2. ROBUST IMPORT: Try importing physics_engine both ways (local vs module)
+try:
+    from physics_engine import process_frames
+except ImportError:
+    try:
+        from .physics_engine import process_frames
+    except ImportError:
+        print("CRITICAL WARNING: 'physics_engine.py' not found. Ensure it is in the server/ directory.")
+        process_frames = lambda frames, config: [] # Fallback to prevent crash
 
-# AI
+# 3. AI SDK IMPORT
 try:
     from google.genai import Client
     import google.genai.types as types
 except ImportError:
     print("Warning: Google GenAI SDK not found. Install google-genai.")
 
-# Computer Vision
-import cv2
-import numpy as np
-
-# --- VITPOSE MOCK INTEGRATION ---
-# Real integration would use:
-# from mmpose.apis import init_model, inference_topdown
-# from mmpose.utils import register_all_modules
-# register_all_modules()
-
+# 4. INITIALIZE APP (Must be before routes!)
 app = FastAPI()
 
+# 5. CORS MIDDLEWARE
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,6 +42,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 6. DATA MODELS
 class MotionConfig(BaseModel):
     sensitivity: float
     windowSize: int
@@ -54,32 +60,36 @@ class AnalysisResponse(BaseModel):
     biomarkers: Dict[str, Any]
     report: Dict[str, Any]
 
-# --- GEMINI SERVICE (Python Backend) ---
+# 7. HELPER FUNCTIONS
 def generate_gemini_report(biomarkers: Dict[str, Any]):
-    api_key = os.environ.get("API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY") # Check env var
     if not api_key:
+        # Fallback to checking the process env if set elsewhere
+        api_key = os.environ.get("API_KEY")
+    
+    if not api_key:
+        print("Error: GEMINI_API_KEY not found in environment variables.")
         return {"error": "API Key missing"}
         
-    client = Client(api_key=api_key)
-    
-    prompt = f"""
-    You are an expert Neonatal Neurologist. Analyze these biomarkers from ViTPose (Python Backend):
-    {json.dumps(biomarkers, indent=2)}
-    
-    Provide JSON output with classification (Normal, Sarnat Stage I/II/III, Seizures) and reasoning.
-    """
-    
     try:
+        client = Client(api_key=api_key)
+        prompt = f"""
+        You are an expert Neonatal Neurologist. Analyze these biomarkers from ViTPose (Python Backend):
+        {json.dumps(biomarkers, indent=2)}
+        
+        Provide JSON output with classification (Normal, Sarnat Stage I/II/III, Seizures) and reasoning.
+        """
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash', # Updated to a widely available model alias
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type='application/json')
         )
         return json.loads(response.text)
     except Exception as e:
         print(f"Gemini Error: {e}")
-        return {"classification": "Unknown", "clinicalAnalysis": "AI Error"}
+        return {"classification": "Unknown", "clinicalAnalysis": f"AI Error: {str(e)}"}
 
+# 8. API ROUTES
 @app.post("/analyze_frames")
 async def analyze_frames_endpoint(request: AnalysisRequest):
     """
@@ -87,24 +97,33 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
     """
     print(f"Received {len(request.frames)} frames for analysis")
     
-    # 1. Run Physics Engine (Python NumPy)
-    metrics = process_frames(request.frames, request.config.dict())
+    # Run Physics Engine
+    metrics = process_frames(request.frames, request.config.model_dump())
     
-    # 2. Calculate Aggregates
+    # Handle empty metrics gracefully
     if not metrics:
-        return {"error": "Insufficient data"}
+        print("Physics engine returned no metrics.")
+        return {
+            "metrics": [],
+            "biomarkers": {"error": "Insufficient motion data extracted"},
+            "report": {}
+        }
         
-    ents = [m['entropy'] for m in metrics]
-    jerks = [m['fluency_jerk'] for m in metrics]
+    # Extract aggregates safely
+    ents = [m.get('entropy', 0) for m in metrics]
+    jerks = [m.get('fluency_jerk', 0) for m in metrics]
     
+    if not ents:
+        return {"error": "No entropy data", "metrics": metrics}
+
     biomarkers = {
         "average_sample_entropy": float(np.mean(ents)),
         "peak_sample_entropy": float(np.max(ents)),
-        "average_jerk": float(np.mean(jerks)),
+        "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
         "backend_source": "Python/ViTPose-Pipeline"
     }
     
-    # 3. Call Gemini
+    # Call Gemini
     report = generate_gemini_report(biomarkers)
     
     return {
@@ -117,38 +136,25 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
 async def upload_video_for_vitpose(file: UploadFile = File(...)):
     """
     Endpoint to upload raw video.
-    Server will:
-    1. Save video
-    2. Run ViTPose (MMPose) to extract keypoints
-    3. Run Physics
-    4. Return result
     """
-    # 1. Save File
     temp_filename = f"temp_{int(time.time())}_{file.filename}"
-    with open(temp_filename, "wb") as buffer:
-        buffer.write(await file.read())
+    try:
+        with open(temp_filename, "wb") as buffer:
+            buffer.write(await file.read())
         
-    # 2. Run ViTPose (Mocked for this file, assumes mmpose installed in prod)
-    print(f"Running ViTPose Transformer on {temp_filename}...")
-    
-    # --- VITPOSE LOGIC (MMPose) ---
-    # model = init_model('configs/body_2d_keypoint/topdown_heatmap/coco/td-hm_ViTPose-base_8xb64-210e_coco-256x192.py', checkpoint='vitpose_base.pth', device='cuda:0')
-    # video = cv2.VideoCapture(temp_filename)
-    # frames_keypoints = []
-    # while video.isOpened():
-    #     ret, frame = video.read()
-    #     if not ret: break
-    #     result = inference_topdown(model, frame)
-    #     frames_keypoints.append(convert_to_skeleton(result))
-    
-    # Mocking result for demo response if ViTPose not active
-    # We would return a special flag telling frontend to use local MP or processed data
-    
-    os.remove(temp_filename)
+        print(f"Processing video: {temp_filename}")
+        # Placeholder for ViTPose logic
+        
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
     
     return {"status": "ViTPose processing complete (Simulated)", "frames_processed": 300}
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"status": "active", "model": "ViTPose-Base", "device": "cuda:0"}
 
+@app.get("/")
+def root():
+    return {"message": "Neuromotion AI Backend is Running"}

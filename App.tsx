@@ -581,7 +581,7 @@ const App: React.FC = () => {
              <div className="animate-fade-in">
                 <div className="mb-6 flex items-center justify-between no-print">
                     <button onClick={() => setView('dashboard')} className="text-slate-500 hover:text-slate-800 flex items-center gap-2 transition-colors"><i className="fas fa-arrow-left"></i> Back to Dashboard</button>
-                    {appMode === 'training' && ( <div className="text-sm text-slate-600 font-bold">Step 1: Upload & Diagnose (Expert) -> Step 2: AI Analysis & Optimization</div> )}
+                    {appMode === 'training' && ( <div className="text-sm text-slate-600 font-bold">Step 1: Upload & Diagnose (Expert) &gt; Step 2: AI Analysis & Optimization</div> )}
                 </div>
                 {appMode === 'training' && stage === PipelineStage.INGESTION && (
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 mb-8">

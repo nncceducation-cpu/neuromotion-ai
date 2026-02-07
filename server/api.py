@@ -9,6 +9,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import asyncio
 import json
 import time
 import numpy as np
@@ -30,8 +31,32 @@ try:
 except ImportError:
     print("Warning: Google GenAI SDK not found. Install google-genai.")
 
+# 3b. VITPOSE IMPORT (optional — graceful fallback if not installed)
+try:
+    from vitpose_inference import load_models, process_video, is_loaded
+    VITPOSE_AVAILABLE = True
+except ImportError:
+    print("Info: vitpose_inference not available. ViTPose disabled, MediaPipe-only mode.")
+    VITPOSE_AVAILABLE = False
+
 # 4. INITIALIZE APP (Must be before routes!)
 app = FastAPI()
+
+# 4b. STARTUP: Load ViTPose models once
+@app.on_event("startup")
+async def startup_event():
+    if VITPOSE_AVAILABLE:
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(None, load_models)
+        if success:
+            print("ViTPose models loaded successfully at startup.")
+        else:
+            print("WARNING: ViTPose models failed to load. /upload_video will be unavailable.")
+    else:
+        print("ViTPose not installed. Running in MediaPipe-only mode.")
+
+# GPU semaphore: prevent concurrent inference (not thread-safe)
+_gpu_semaphore = asyncio.Semaphore(1)
 
 # 5. CORS MIDDLEWARE
 app.add_middleware(
@@ -135,25 +160,86 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
 @app.post("/upload_video")
 async def upload_video_for_vitpose(file: UploadFile = File(...)):
     """
-    Endpoint to upload raw video.
+    Upload a video for server-side ViTPose processing.
+    Runs: detection -> pose estimation -> physics engine -> Gemini report.
     """
+    if not VITPOSE_AVAILABLE or not is_loaded():
+        raise HTTPException(status_code=503, detail="ViTPose models not available")
+
+    config = MotionConfig(
+        sensitivity=0.85, windowSize=30, entropyThreshold=0.4,
+        jerkThreshold=5.0, rhythmicityWeight=0.7, stiffnessThreshold=0.6
+    )
+
     temp_filename = f"temp_{int(time.time())}_{file.filename}"
     try:
+        contents = await file.read()
         with open(temp_filename, "wb") as buffer:
-            buffer.write(await file.read())
-        
-        print(f"Processing video: {temp_filename}")
-        # Placeholder for ViTPose logic
-        
+            buffer.write(contents)
+        print(f"Processing video: {temp_filename} ({len(contents)} bytes)")
+
+        # Run ViTPose pipeline (GPU-exclusive via semaphore)
+        async with _gpu_semaphore:
+            loop = asyncio.get_event_loop()
+            skeleton_frames = await loop.run_in_executor(
+                None, lambda: process_video(temp_filename, target_fps=10.0)
+            )
+
+        if len(skeleton_frames) < 10:
+            return {
+                "metrics": [], "biomarkers": {"error": "Insufficient pose data from video"},
+                "report": {"error": "Too few valid frames"}, "frames_processed": len(skeleton_frames)
+            }
+
+        # Reuse existing physics engine
+        metrics = process_frames(skeleton_frames, config.model_dump())
+        if not metrics:
+            return {
+                "metrics": [], "biomarkers": {"error": "Physics engine returned no metrics"},
+                "report": {}, "frames_processed": len(skeleton_frames)
+            }
+
+        ents = [m.get('entropy', 0) for m in metrics]
+        jerks = [m.get('fluency_jerk', 0) for m in metrics]
+        biomarkers = {
+            "average_sample_entropy": float(np.mean(ents)),
+            "peak_sample_entropy": float(np.max(ents)),
+            "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
+            "backend_source": "Python/ViTPose-Pipeline",
+            "frames_processed": len(skeleton_frames)
+        }
+
+        report = generate_gemini_report(biomarkers)
+
+        return {
+            "metrics": metrics, "biomarkers": biomarkers,
+            "report": report, "frames_processed": len(skeleton_frames)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Upload video error: {e}")
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
-    
-    return {"status": "ViTPose processing complete (Simulated)", "frames_processed": 300}
 
 @app.get("/health")
 def health_check():
-    return {"status": "active", "model": "ViTPose-Base", "device": "cuda:0"}
+    try:
+        import torch
+        gpu_available = torch.cuda.is_available()
+        gpu_name = torch.cuda.get_device_name(0) if gpu_available else "None"
+        device = f"cuda:0 ({gpu_name})" if gpu_available else "cpu"
+    except ImportError:
+        gpu_available = False
+        device = "cpu"
+    return {
+        "status": "active",
+        "model": "ViTPose-Base" if VITPOSE_AVAILABLE else "MediaPipe-only",
+        "device": device,
+        "vitpose_loaded": VITPOSE_AVAILABLE and is_loaded() if VITPOSE_AVAILABLE else False,
+    }
 
 @app.get("/")
 def root():

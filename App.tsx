@@ -477,15 +477,28 @@ const App: React.FC = () => {
              if (useBackend) {
                 try {
                     setStage(PipelineStage.MOVEMENT_LAB);
-                    // Send to Python Backend
-                    const response = await fetch(`${SERVER_URL}/analyze_frames`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ frames: frames, config: motionConfig })
-                    });
-                    
+                    let response: Response;
+
+                    if (file && !isLive) {
+                        // Upload raw video for server-side ViTPose processing
+                        setStage(PipelineStage.LIFTING_3D);
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        response = await fetch(`${SERVER_URL}/upload_video`, {
+                            method: 'POST',
+                            body: formData,
+                        });
+                    } else {
+                        // Live mode: send MediaPipe keypoints
+                        response = await fetch(`${SERVER_URL}/analyze_frames`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ frames: frames, config: motionConfig })
+                        });
+                    }
+
                     if (!response.ok) throw new Error("Backend Error");
-                    
+
                     const backendData = await response.json();
                     
                     if (backendData.metrics) {

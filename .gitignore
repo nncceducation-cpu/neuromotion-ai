@@ -19,6 +19,13 @@ dist-ssr
 .venv/
 __pycache__/
 
+# Azure Functions
+local.settings.json
+.python_packages/
+
+# Windows reserved names
+nul
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

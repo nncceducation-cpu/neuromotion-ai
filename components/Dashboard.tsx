@@ -7,13 +7,14 @@ interface DashboardProps {
   user: User;
   onNewAnalysis: () => void;
   onLiveAnalysis: () => void;
-  onTrainingMode: () => void; 
-  onComparisonMode: () => void; 
+  onTrainingMode: () => void;
+  onComparisonMode: () => void;
+  onValidationView: () => void;  // NEW: Navigate to validation UI
   onViewReport: (report: SavedReport) => void;
   onCompareReports: (reports: SavedReport[]) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiveAnalysis, onTrainingMode, onComparisonMode, onViewReport, onCompareReports }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiveAnalysis, onTrainingMode, onComparisonMode, onValidationView, onViewReport, onCompareReports }) => {
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [learnedStats, setLearnedStats] = useState<{ totalLearned: number, breakdown: Record<string, number> }>({ totalLearned: 0, breakdown: {} });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -88,14 +89,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
             >
                 <i className="fas fa-video mr-2"></i> Live Assessment
             </button>
-            <button 
+            <button
                 onClick={onTrainingMode}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-semibold shadow-lg shadow-indigo-900/50 transition-all flex items-center border border-indigo-400/30"
             >
                 <i className="fas fa-graduation-cap mr-2"></i> Training Mode
             </button>
+            {/* DOCTOR VALIDATION BUTTON - Review AI predictions and add ground truth */}
+            <button
+                onClick={onValidationView}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-semibold shadow-lg shadow-emerald-900/50 transition-all flex items-center border border-emerald-400/30"
+            >
+                <i className="fas fa-clipboard-check mr-2"></i> Doctor Validation
+            </button>
              {/* COMPARISON MODE BUTTON (Manual Upload) */}
-             <button 
+             <button
                 onClick={onComparisonMode}
                 className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg transition-all flex items-center border border-slate-500"
             >

@@ -13,6 +13,7 @@ import asyncio
 import json
 import time
 import numpy as np
+from datetime import datetime, timezone  # For timestamping logged data
 
 # 2. ROBUST IMPORT: Try importing physics_engine both ways (local vs module)
 try:
@@ -93,33 +94,173 @@ class AnalysisResponse(BaseModel):
     report: Dict[str, Any]
 
 # 7. HELPER FUNCTIONS
+
+def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, Any],
+                        ground_truth: Optional[str] = None, metadata: Optional[Dict] = None,
+                        first_frame_skeleton: Optional[Dict[str, Any]] = None):
+    """
+    Logs analysis results to a JSONL file for future model training.
+
+    **Why we do this:** Every analysis is a potential training example. By logging:
+    - biomarkers (input features)
+    - gemini_response (AI prediction)
+    - ground_truth (doctor's diagnosis, when available)
+    - first_frame_skeleton (for visual verification of pose detection)
+    We build a dataset that can be used to train a specialized fine-tuned model later.
+
+    **JSONL format:** Each line is a separate JSON object. This is better than a single
+    JSON array because it allows appending new records without reading the entire file.
+
+    **NEW: Skeleton visualization** - We now log the first frame's skeleton with all
+    17 COCO keypoints labeled. This lets doctors verify that YOLO26 detected the pose
+    correctly before trusting the analysis.
+
+    Args:
+        biomarkers: The computed motion metrics (entropy, jerk, etc.)
+        gemini_response: Gemini's classification and reasoning
+        ground_truth: Optional doctor-verified diagnosis (add this via API later)
+        metadata: Optional extra info (video_id, patient_age, etc.)
+        first_frame_skeleton: First frame's keypoints for visual verification
+    """
+    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
+    os.makedirs(log_dir, exist_ok=True)  # Create directory if it doesn't exist
+
+    # Use JSONL format: one JSON object per line
+    # This is the standard format for ML training datasets
+    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
+
+    # Label skeleton keypoints with COCO names for clarity
+    skeleton_with_labels = None
+    if first_frame_skeleton and "joints" in first_frame_skeleton:
+        # COCO 17 keypoint names (standard order)
+        coco_keypoint_names = [
+            "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+            "left_wrist", "right_wrist", "left_hip", "right_hip",
+            "left_knee", "right_knee", "left_ankle", "right_ankle"
+        ]
+
+        skeleton_with_labels = {
+            "timestamp": first_frame_skeleton.get("timestamp", 0),
+            "joints": first_frame_skeleton["joints"],
+            "keypoint_labels": coco_keypoint_names,
+            "note": "All 17 COCO keypoints - verify YOLO26 detected pose correctly"
+        }
+
+    log_entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),  # ISO format: 2026-02-08T15:30:00.123456+00:00
+        "biomarkers": biomarkers,
+        "gemini_prediction": gemini_response,
+        "ground_truth": ground_truth,  # null until doctor validates
+        "doctor_notes": None,  # Will be filled via /validate endpoint
+        "first_frame_skeleton": skeleton_with_labels,  # For visual verification
+        "metadata": metadata or {}
+    }
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry) + "\n")
+        print(f"✓ Logged analysis to {log_file}")
+    except Exception as e:
+        print(f"Warning: Failed to log analysis: {e}")
+
+
 def generate_gemini_report(biomarkers: Dict[str, Any]):
+    """
+    Sends biomarkers to Gemini 2.0 Flash for clinical classification.
+
+    **Improvements made:**
+    1. **Structured output schema:** We specify the exact JSON structure Gemini must return
+    2. **Few-shot learning:** We provide 2 example cases to guide Gemini's reasoning
+    3. **Confidence scoring:** We ask Gemini to include a confidence level (0.0-1.0)
+
+    **What is few-shot learning?**
+    Instead of just describing the task, we show the AI 2-3 examples of input → output.
+    This dramatically improves accuracy because the AI learns the pattern by example.
+    Think of it like showing a student sample problems before giving them the real test.
+    """
     api_key = os.environ.get("GEMINI_API_KEY") # Check env var
     if not api_key:
         # Fallback to checking the process env if set elsewhere
         api_key = os.environ.get("API_KEY")
-    
+
     if not api_key:
         print("Error: GEMINI_API_KEY not found in environment variables.")
         return {"error": "API Key missing"}
-        
+
     try:
         client = Client(api_key=api_key)  # type: ignore[call-arg]
-        prompt = f"""
-        You are an expert Neonatal Neurologist. Analyze these biomarkers from YOLO26 Pose (Python Backend):
-        {json.dumps(biomarkers, indent=2)}
 
-        Provide JSON output with classification (Normal, Sarnat Stage I/II/III, Seizures) and reasoning.
-        """
+        # IMPROVEMENT #1 & #2: Structured schema + Few-shot examples
+        # We provide example cases so Gemini learns the reasoning pattern
+        prompt = f"""You are an expert Neonatal Neurologist analyzing infant motion biomarkers for signs of neurological impairment.
+
+**BACKGROUND:**
+- Sample Entropy: Measures movement complexity (0.3-0.6 = normal, >0.7 = dysregulated/chaotic, <0.2 = overly rigid)
+- Jerk (fluency): Measures smoothness (4-7 = normal, >8 = jerky/uncoordinated, <3 = hypokinetic)
+- Typical ranges based on research: Normal infants show entropy ~0.4±0.15, jerk ~5.5±1.5
+
+**FEW-SHOT EXAMPLES (learn from these):**
+
+Example 1:
+Input: {{"average_sample_entropy": 0.38, "peak_sample_entropy": 0.52, "average_jerk": 5.2}}
+Output: {{
+  "classification": "Normal",
+  "confidence": 0.92,
+  "reasoning": "All biomarkers within normal ranges. Entropy of 0.38 indicates healthy movement variability. Jerk of 5.2 suggests smooth, coordinated motion typical of neurologically intact infants."
+}}
+
+Example 2:
+Input: {{"average_sample_entropy": 0.82, "peak_sample_entropy": 1.15, "average_jerk": 9.3}}
+Output: {{
+  "classification": "Sarnat Stage II",
+  "confidence": 0.78,
+  "reasoning": "Elevated entropy (0.82, >1.5 SD above normal) indicates dysregulated, chaotic movements. High jerk (9.3) suggests impaired motor control. Pattern consistent with moderate HIE. Recommend continuous monitoring and EEG correlation."
+}}
+
+**NOW ANALYZE THIS CASE:**
+Input: {json.dumps(biomarkers, indent=2)}
+
+**REQUIRED OUTPUT FORMAT (strict JSON schema):**
+{{
+  "classification": "Normal" | "Sarnat Stage I" | "Sarnat Stage II" | "Sarnat Stage III" | "Seizures" | "Uncertain",
+  "confidence": <float between 0.0 and 1.0>,
+  "reasoning": "<2-3 sentence clinical explanation citing specific biomarker values>",
+  "recommendations": "<optional: suggest EEG, imaging, or clinical actions if abnormal>"
+}}
+
+**IMPORTANT:**
+- Use "Uncertain" if biomarkers are ambiguous or contradictory
+- Confidence should reflect how clear-cut the pattern is
+- Always cite specific values in your reasoning (e.g., "entropy of 0.82")
+"""
+
         response = client.models.generate_content(
-            model='gemini-2.0-flash', # Updated to a widely available model alias
+            model='gemini-2.0-flash',
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type='application/json')  # type: ignore[call-arg]
         )
-        return json.loads(response.text)  # type: ignore[arg-type]
+
+        # Parse response and ensure it has the required fields
+        result = json.loads(response.text)  # type: ignore[arg-type]
+
+        # Validate schema (basic sanity check)
+        required_fields = ["classification", "confidence", "reasoning"]
+        for field in required_fields:
+            if field not in result:
+                print(f"Warning: Gemini response missing '{field}' field")
+                result[field] = "Unknown" if field == "classification" else 0.0 if field == "confidence" else "No reasoning provided"
+
+        return result
+
     except Exception as e:
         print(f"Gemini Error: {e}")
-        return {"classification": "Unknown", "clinicalAnalysis": f"AI Error: {str(e)}"}
+        return {
+            "classification": "Error",
+            "confidence": 0.0,
+            "reasoning": f"AI service error: {str(e)}",
+            "recommendations": "Manual review required"
+        }
 
 # 8. API ROUTES
 @app.post("/analyze_frames")
@@ -154,10 +295,20 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
         "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
         "backend_source": "Python/YOLO26-Pipeline"
     }
-    
-    # Call Gemini
+
+    # Call Gemini (IMPROVEMENT #2: few-shot + structured output)
     report = generate_gemini_report(biomarkers)
-    
+
+    # IMPROVEMENT #3: Log everything for future model training
+    # Note: ground_truth is None for now - later, add an endpoint for doctors to validate
+    log_analysis_result(
+        biomarkers=biomarkers,
+        gemini_response=report,
+        ground_truth=None,  # TODO: Add a /validate endpoint for doctor feedback
+        metadata={"source": "frontend_mediapipe", "frame_count": len(request.frames)},
+        first_frame_skeleton=request.frames[0] if request.frames else None  # For visual verification
+    )
+
     return {
         "metrics": metrics,
         "biomarkers": biomarkers,
@@ -218,6 +369,19 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
 
         report = generate_gemini_report(biomarkers)
 
+        # IMPROVEMENT #3: Log this analysis for future training
+        log_analysis_result(
+            biomarkers=biomarkers,
+            gemini_response=report,
+            ground_truth=None,  # TODO: Add validation workflow
+            metadata={
+                "source": "video_upload",
+                "filename": file.filename,
+                "frames_processed": len(skeleton_frames)
+            },
+            first_frame_skeleton=skeleton_frames[0] if skeleton_frames else None  # For visual verification
+        )
+
         return {
             "metrics": metrics, "biomarkers": biomarkers,
             "report": report, "frames_processed": len(skeleton_frames)
@@ -251,3 +415,118 @@ def health_check():
 @app.get("/")
 def root():
     return {"message": "Neuromotion AI Backend is Running"}
+
+# BONUS: Validation Endpoint for Ground Truth Labels
+class ValidationRequest(BaseModel):
+    """
+    Data model for doctor validation of AI predictions.
+
+    This allows clinicians to correct AI mistakes, which builds a labeled
+    dataset for training a fine-tuned model in the future.
+    """
+    timestamp: str  # ISO timestamp of the original analysis (from log file)
+    ground_truth_classification: str  # Doctor's actual diagnosis
+    doctor_notes: Optional[str] = None  # Optional clinical context
+
+@app.post("/validate")
+async def validate_prediction(request: ValidationRequest):
+    """
+    Endpoint for doctors to submit ground truth labels for AI predictions.
+
+    **Use case:**
+    After a patient is diagnosed, a neurologist can use this endpoint to
+    label the AI's prediction as correct/incorrect and provide the true diagnosis.
+
+    **How it works:**
+    1. Find the log entry with matching timestamp
+    2. Update the ground_truth field with doctor's diagnosis
+    3. This labeled data can later be used to train a specialized model
+
+    **Future enhancement:**
+    Build a simple web UI where doctors review cases and submit validations.
+    """
+    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
+    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
+
+    if not os.path.exists(log_file):
+        raise HTTPException(status_code=404, detail="No analysis logs found")
+
+    try:
+        # Read all log entries
+        entries = []
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                entries.append(json.loads(line))
+
+        # Find matching entry by timestamp
+        updated = False
+        for entry in entries:
+            if entry["timestamp"] == request.timestamp:
+                entry["ground_truth"] = request.ground_truth_classification
+                entry["doctor_notes"] = request.doctor_notes
+                entry["validated_at"] = datetime.now(timezone.utc).isoformat()
+                updated = True
+                break
+
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"No analysis found with timestamp {request.timestamp}")
+
+        # Write back to file (rewrite entire file with updated data)
+        with open(log_file, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
+        return {
+            "status": "success",
+            "message": f"Ground truth label '{request.ground_truth_classification}' saved for analysis at {request.timestamp}"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+@app.get("/pending_validations")
+async def get_pending_validations(limit: int = 50, include_validated: bool = False):
+    """
+    Fetch analysis cases that need doctor validation.
+
+    **Query params:**
+    - limit: Max number of cases to return (default 50)
+    - include_validated: If True, return all cases; if False, only unvalidated (default False)
+
+    **Returns:**
+    List of analyses sorted by timestamp (newest first), each containing:
+    - timestamp, biomarkers, gemini_prediction, first_frame_skeleton, metadata
+    - ground_truth (if validated)
+    - doctor_notes (if validated)
+    """
+    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
+    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
+
+    if not os.path.exists(log_file):
+        return {"cases": [], "total": 0}
+
+    try:
+        # Read all log entries
+        entries = []
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                entries.append(json.loads(line))
+
+        # Filter based on validation status
+        if not include_validated:
+            entries = [e for e in entries if not e.get("ground_truth")]
+
+        # Sort by timestamp (newest first)
+        entries.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        # Limit results
+        entries = entries[:limit]
+
+        return {
+            "cases": entries,
+            "total": len(entries),
+            "showing": "all" if include_validated else "unvalidated_only"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch validations: {str(e)}")

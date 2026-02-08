@@ -6,6 +6,7 @@ import { EntropyChart, FluencyChart, FractalChart, PhaseSpaceChart, KineticEnerg
 import { ReportView } from './components/ReportView';
 import { Dashboard } from './components/Dashboard';
 import { ComparisonView } from './components/ComparisonView';
+import { ValidationView } from './components/ValidationView';
 import { generateGMAReport, refineModelParameters } from './services/geminiService';
 import { storageService } from './services/storage';
 import { physicsEngine } from './services/physics'; 
@@ -235,7 +236,7 @@ const VideoOverlay: React.FC<{
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User>({ id: 'default-clinician', name: 'Clinical Specialist', email: 'lab@neuromotion.ai' });
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState<'dashboard' | 'pipeline' | 'comparison' | 'view_report' | 'validation'>('dashboard');
   const [appMode, setAppMode] = useState<'clinical' | 'training'>('clinical');
   const [stage, setStage] = useState<PipelineStage>(PipelineStage.IDLE);
   const [file, setFile] = useState<File | null>(null);
@@ -334,6 +335,7 @@ const App: React.FC = () => {
 
   const startNewAnalysis = () => { setAppMode('clinical'); resetPipeline(); setStage(PipelineStage.INGESTION); setView('pipeline'); };
   const startTrainingMode = () => { setAppMode('training'); resetPipeline(); setStage(PipelineStage.INGESTION); setView('pipeline'); };
+  const startValidationView = () => { resetPipeline(); setView('validation'); };
   
   const startLiveAnalysis = async () => {
     setAppMode('clinical'); resetPipeline(); setIsLive(true); setView('pipeline');
@@ -587,9 +589,10 @@ const App: React.FC = () => {
          </div>
       </header>
       <main className="pt-24 pb-12 px-4 max-w-7xl mx-auto">
-         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
+         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onValidationView={startValidationView} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
          {view === 'comparison' && ( <ComparisonView onBack={() => setView('dashboard')} initialReports={reportsToCompare} /> )}
          {view === 'view_report' && selectedReport && ( <ReportView report={selectedReport} onClose={() => setView('dashboard')} onSaveCorrection={handleSaveCorrection} /> )}
+         {view === 'validation' && ( <ValidationView onClose={() => setView('dashboard')} /> )}
          {view === 'pipeline' && (
              <div className="animate-fade-in">
                 <div className="mb-6 flex items-center justify-between no-print">

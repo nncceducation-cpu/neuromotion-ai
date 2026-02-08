@@ -68,8 +68,6 @@ def fractal_dimension(data: np.ndarray, kmax: int = 5) -> float:
         for m in range(k):
             Lmk = 0
             n_max = int((N - m - 1) / k)
-            if n_max == 0:
-                continue
             for i in range(1, n_max + 1):
                 Lmk += np.abs(data[m + i * k] - data[m + (i - 1) * k])
             norm = (N - 1) / (n_max * k)
@@ -78,13 +76,9 @@ def fractal_dimension(data: np.ndarray, kmax: int = 5) -> float:
         Lk.append(Lm / k)
     
     # Linear Regression of ln(Lk) vs ln(1/k)
-    if not Lk or all(v == 0 for v in Lk):
-        return 1.5  # Default neutral complexity
-    Lk_arr = np.array(Lk)
-    Lk_arr[Lk_arr == 0] = np.finfo(float).tiny  # Replace zeros to avoid log(0)
     x = np.log(1.0 / np.array(range(1, kmax + 1)))
-    y = np.log(Lk_arr)
-
+    y = np.log(np.array(Lk))
+    
     A = np.vstack([x, np.ones(len(x))]).T
     slope, intercept = np.linalg.lstsq(A, y, rcond=None)[0]
     return slope # HFD

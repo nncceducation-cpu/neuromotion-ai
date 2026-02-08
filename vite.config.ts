@@ -8,21 +8,6 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
-        // FIX: Add proxy to redirect API calls to FastAPI
-        proxy: {
-          '/analyze_frames': {
-            target: 'http://127.0.0.1:8000',
-            changeOrigin: true,
-          },
-          '/upload_video': {
-            target: 'http://127.0.0.1:8000',
-            changeOrigin: true,
-          },
-          '/health': {
-             target: 'http://127.0.0.1:8000',
-             changeOrigin: true,
-          }
-        }
       },
       plugins: [react()],
       define: {

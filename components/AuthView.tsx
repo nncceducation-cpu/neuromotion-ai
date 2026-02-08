@@ -19,9 +19,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     setIsLoading(true);
 
     try {
-      // Simulate network delay
       await new Promise(r => setTimeout(r, 800));
-      
       const user = storageService.login(email, password);
       onLogin(user);
     } catch (err: any) {
@@ -33,72 +31,62 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4">
-      <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-100 w-full max-w-md">
+      <div className="bg-white p-8 rounded-lg border border-neutral-200 w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-sky-500 rounded-xl flex items-center justify-center text-white font-bold text-xl mx-auto mb-4 shadow-lg shadow-sky-200">
+          <div className="w-10 h-10 bg-neutral-900 rounded-lg flex items-center justify-center text-white font-semibold text-sm mx-auto mb-4">
             N
           </div>
-          <h2 className="text-2xl font-bold text-slate-800">
-            Sign In
+          <h2 className="text-xl font-semibold text-neutral-900">
+            Sign in to NeuroMotion
           </h2>
-          <p className="text-slate-500 mt-2 text-sm">
-            Sign in to access your analysis history
+          <p className="text-neutral-500 mt-1 text-sm">
+            Enter your credentials to continue
           </p>
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg flex items-center">
-            <i className="fas fa-exclamation-circle mr-2"></i>
+          <div className="mb-6 p-3 bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm rounded-lg">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-            <div className="relative">
-              <i className="fas fa-envelope absolute left-3 top-3 text-slate-400"></i>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none transition-all"
-                placeholder="doctor@clinic.com"
-              />
-            </div>
+            <label className="block text-xs font-medium text-neutral-700 mb-1.5">Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
+              placeholder="doctor@clinic.com"
+            />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-            <div className="relative">
-              <i className="fas fa-lock absolute left-3 top-3 text-slate-400"></i>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none transition-all"
-                placeholder="••••••••"
-              />
-            </div>
+            <label className="block text-xs font-medium text-neutral-700 mb-1.5">Password</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
+              placeholder="••••••••"
+            />
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-sky-600 text-white py-2.5 rounded-lg font-semibold hover:bg-sky-700 transition-colors shadow-lg shadow-sky-100 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
+            className="w-full bg-neutral-900 text-white py-2.5 rounded-lg font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
-            {isLoading ? <i className="fas fa-circle-notch fa-spin"></i> : 'Sign In'}
+            {isLoading ? <i className="fas fa-circle-notch fa-spin"></i> : 'Continue'}
           </button>
         </form>
 
-        <div className="mt-6 text-center p-4 bg-slate-50 rounded-lg border border-slate-100">
-          <p className="text-xs text-slate-500 font-medium">Demo Access</p>
-          <div className="flex justify-between items-center text-xs text-slate-400 mt-2">
-             <span>Email: demo@neuromotion.ai</span>
-             <span>Pass: demo</span>
-          </div>
+        <div className="mt-6 text-center p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-medium mb-1">Demo Access</p>
+          <p className="text-xs text-neutral-500 font-mono">demo@neuromotion.ai / demo</p>
         </div>
       </div>
     </div>

@@ -57,7 +57,7 @@ def load_models() -> bool:
 
     try:
         import torch
-        from ultralytics import YOLO
+        from ultralytics import YOLO  # type: ignore[import-not-found]
 
         DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -150,7 +150,7 @@ def process_video(
     det_score_threshold: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """Full pipeline: video -> frames -> YOLO26 detection+pose -> SkeletonFrames."""
-    if not _models_loaded:
+    if not _models_loaded or _model is None:
         raise RuntimeError("Models not loaded. Call load_models() first.")
 
     frames, actual_fps, width, height = extract_frames_from_video(video_path, target_fps)

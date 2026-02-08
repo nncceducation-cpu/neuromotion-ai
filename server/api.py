@@ -38,6 +38,13 @@ try:
 except ImportError:
     print("Info: yolo_inference not available. YOLO26 Pose disabled, MediaPipe-only mode.")
     YOLO_AVAILABLE = False
+    # Define stub functions for type checking
+    def load_models() -> bool:
+        return False
+    def process_video(video_path: str, target_fps: float = 10.0) -> list:
+        return []
+    def is_loaded() -> bool:
+        return False
 
 # 4. INITIALIZE APP (Must be before routes!)
 app = FastAPI()
@@ -97,19 +104,19 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
         return {"error": "API Key missing"}
         
     try:
-        client = Client(api_key=api_key)
+        client = Client(api_key=api_key)  # type: ignore[call-arg]
         prompt = f"""
         You are an expert Neonatal Neurologist. Analyze these biomarkers from YOLO26 Pose (Python Backend):
         {json.dumps(biomarkers, indent=2)}
-        
+
         Provide JSON output with classification (Normal, Sarnat Stage I/II/III, Seizures) and reasoning.
         """
         response = client.models.generate_content(
             model='gemini-2.0-flash', # Updated to a widely available model alias
             contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type='application/json')
+            config=types.GenerateContentConfig(response_mime_type='application/json')  # type: ignore[call-arg]
         )
-        return json.loads(response.text)
+        return json.loads(response.text)  # type: ignore[arg-type]
     except Exception as e:
         print(f"Gemini Error: {e}")
         return {"classification": "Unknown", "clinicalAnalysis": f"AI Error: {str(e)}"}

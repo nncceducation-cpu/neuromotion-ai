@@ -6,6 +6,7 @@ import { EntropyChart, FluencyChart, FractalChart, PhaseSpaceChart, KineticEnerg
 import { ReportView } from './components/ReportView';
 import { Dashboard } from './components/Dashboard';
 import { ComparisonView } from './components/ComparisonView';
+import { ValidationView } from './components/ValidationView';
 import { generateGMAReport, refineModelParameters } from './services/geminiService';
 import { storageService } from './services/storage';
 import { physicsEngine } from './services/physics'; 
@@ -575,7 +576,8 @@ const App: React.FC = () => {
          </div>
       </header>
       <main className="pt-20 pb-12 px-4 max-w-7xl mx-auto">
-         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
+         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onValidationView={() => setView('validation')} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
+         {view === 'validation' && ( <ValidationView onClose={() => setView('dashboard')} /> )}
          {view === 'comparison' && ( <ComparisonView onBack={() => setView('dashboard')} initialReports={reportsToCompare} /> )}
          {view === 'view_report' && selectedReport && ( <ReportView report={selectedReport} onClose={() => setView('dashboard')} onSaveCorrection={handleSaveCorrection} /> )}
          {view === 'pipeline' && (

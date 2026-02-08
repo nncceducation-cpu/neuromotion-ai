@@ -31,29 +31,29 @@ try:
 except ImportError:
     print("Warning: Google GenAI SDK not found. Install google-genai.")
 
-# 3b. VITPOSE IMPORT (optional — graceful fallback if not installed)
+# 3b. YOLO26 POSE IMPORT (optional — graceful fallback if not installed)
 try:
-    from vitpose_inference import load_models, process_video, is_loaded
-    VITPOSE_AVAILABLE = True
+    from yolo_inference import load_models, process_video, is_loaded
+    YOLO_AVAILABLE = True
 except ImportError:
-    print("Info: vitpose_inference not available. ViTPose disabled, MediaPipe-only mode.")
-    VITPOSE_AVAILABLE = False
+    print("Info: yolo_inference not available. YOLO26 Pose disabled, MediaPipe-only mode.")
+    YOLO_AVAILABLE = False
 
 # 4. INITIALIZE APP (Must be before routes!)
 app = FastAPI()
 
-# 4b. STARTUP: Load ViTPose models once
+# 4b. STARTUP: Load YOLO26 Pose model once
 @app.on_event("startup")
 async def startup_event():
-    if VITPOSE_AVAILABLE:
+    if YOLO_AVAILABLE:
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(None, load_models)
         if success:
-            print("ViTPose models loaded successfully at startup.")
+            print("YOLO26 Pose model loaded successfully at startup.")
         else:
-            print("WARNING: ViTPose models failed to load. /upload_video will be unavailable.")
+            print("WARNING: YOLO26 Pose model failed to load. /upload_video will be unavailable.")
     else:
-        print("ViTPose not installed. Running in MediaPipe-only mode.")
+        print("YOLO26 Pose not installed. Running in MediaPipe-only mode.")
 
 # GPU semaphore: prevent concurrent inference (not thread-safe)
 _gpu_semaphore = asyncio.Semaphore(1)
@@ -99,7 +99,7 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
     try:
         client = Client(api_key=api_key)
         prompt = f"""
-        You are an expert Neonatal Neurologist. Analyze these biomarkers from ViTPose (Python Backend):
+        You are an expert Neonatal Neurologist. Analyze these biomarkers from YOLO26 Pose (Python Backend):
         {json.dumps(biomarkers, indent=2)}
         
         Provide JSON output with classification (Normal, Sarnat Stage I/II/III, Seizures) and reasoning.
@@ -118,7 +118,7 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
 @app.post("/analyze_frames")
 async def analyze_frames_endpoint(request: AnalysisRequest):
     """
-    Endpoint for frontend to send MediaPipe/ViTPose keypoints for Physics Processing + Gemini
+    Endpoint for frontend to send MediaPipe/YOLO26 keypoints for Physics Processing + Gemini
     """
     print(f"Received {len(request.frames)} frames for analysis")
     
@@ -145,7 +145,7 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
         "average_sample_entropy": float(np.mean(ents)),
         "peak_sample_entropy": float(np.max(ents)),
         "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
-        "backend_source": "Python/ViTPose-Pipeline"
+        "backend_source": "Python/YOLO26-Pipeline"
     }
     
     # Call Gemini
@@ -158,13 +158,13 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
     }
 
 @app.post("/upload_video")
-async def upload_video_for_vitpose(file: UploadFile = File(...)):
+async def upload_video_for_pose(file: UploadFile = File(...)):
     """
-    Upload a video for server-side ViTPose processing.
-    Runs: detection -> pose estimation -> physics engine -> Gemini report.
+    Upload a video for server-side YOLO26 Pose processing.
+    Runs: detection + pose estimation -> physics engine -> Gemini report.
     """
-    if not VITPOSE_AVAILABLE or not is_loaded():
-        raise HTTPException(status_code=503, detail="ViTPose models not available")
+    if not YOLO_AVAILABLE or not is_loaded():
+        raise HTTPException(status_code=503, detail="YOLO26 Pose model not available")
 
     config = MotionConfig(
         sensitivity=0.85, windowSize=30, entropyThreshold=0.4,
@@ -178,7 +178,7 @@ async def upload_video_for_vitpose(file: UploadFile = File(...)):
             buffer.write(contents)
         print(f"Processing video: {temp_filename} ({len(contents)} bytes)")
 
-        # Run ViTPose pipeline (GPU-exclusive via semaphore)
+        # Run YOLO26 pipeline (GPU-exclusive via semaphore)
         async with _gpu_semaphore:
             loop = asyncio.get_event_loop()
             skeleton_frames = await loop.run_in_executor(
@@ -205,7 +205,7 @@ async def upload_video_for_vitpose(file: UploadFile = File(...)):
             "average_sample_entropy": float(np.mean(ents)),
             "peak_sample_entropy": float(np.max(ents)),
             "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
-            "backend_source": "Python/ViTPose-Pipeline",
+            "backend_source": "Python/YOLO26-Pipeline",
             "frames_processed": len(skeleton_frames)
         }
 
@@ -236,9 +236,9 @@ def health_check():
         device = "cpu"
     return {
         "status": "active",
-        "model": "ViTPose-Base" if VITPOSE_AVAILABLE else "MediaPipe-only",
+        "model": "YOLO26x-Pose" if YOLO_AVAILABLE else "MediaPipe-only",
         "device": device,
-        "vitpose_loaded": VITPOSE_AVAILABLE and is_loaded() if VITPOSE_AVAILABLE else False,
+        "yolo_loaded": YOLO_AVAILABLE and is_loaded() if YOLO_AVAILABLE else False,
     }
 
 @app.get("/")

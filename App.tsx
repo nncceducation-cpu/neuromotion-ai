@@ -480,7 +480,7 @@ const App: React.FC = () => {
                     let response: Response;
 
                     if (file && !isLive) {
-                        // Upload raw video for server-side ViTPose processing
+                        // Upload raw video for server-side YOLO26 processing
                         setStage(PipelineStage.LIFTING_3D);
                         const formData = new FormData();
                         formData.append('file', file);
@@ -511,12 +511,12 @@ const App: React.FC = () => {
                             seizureDetected: backendData.report.classification === 'Seizures',
                             seizureType: "None",
                             rawData: { ...backendData.biomarkers, posture: {}, seizure: {} }, // simplified for demo
-                            clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (ViTPose)",
+                            clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (YOLO26)",
                             recommendations: ["Review backend logs"],
                             timelineData: backendData.metrics
                         };
                         
-                        const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live (ViTPose)` : file?.name || "Unknown");
+                        const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live (YOLO26)` : file?.name || "Unknown");
                         await new Promise(resolve => setTimeout(resolve, 500));
                         setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
                         return;
@@ -575,7 +575,7 @@ const App: React.FC = () => {
                   className={`text-xs px-3 py-1 rounded-full font-bold border flex items-center transition-all ${useBackend ? 'bg-slate-200 text-slate-700 border-slate-300 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
                >
                    <i className={`fas ${useBackend ? 'fa-server' : 'fa-laptop'} mr-2`}></i>
-                   {useBackend ? 'Server Mode (ViTPose)' : 'Local Mode (Browser)'}
+                   {useBackend ? 'Server Mode (YOLO26)' : 'Local Mode (Browser)'}
                </button>
                {appMode === 'training' && ( <div className="bg-slate-700 text-white text-xs px-3 py-1 rounded-full font-bold flex items-center shadow-sm"><i className="fas fa-graduation-cap mr-2"></i> Training Mode Active</div> )}
                <div className="flex items-center gap-2">
@@ -633,7 +633,7 @@ const App: React.FC = () => {
                                             <input type="file" className="hidden" accept="video/*" onChange={handleFileUpload} />
                                         </label>
                                         <p className="mt-4 text-sm opacity-60">Supported formats: MP4, MOV, WEBM</p>
-                                        {useBackend && <div className="mt-2 text-xs text-slate-400 font-mono">Server Mode Active (ViTPose)</div>}
+                                        {useBackend && <div className="mt-2 text-xs text-slate-400 font-mono">Server Mode Active (YOLO26)</div>}
                                     </div>
                                 )}
                             </div>

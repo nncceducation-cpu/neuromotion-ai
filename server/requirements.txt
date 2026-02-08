@@ -1,6 +1,3 @@
-# Azure Functions
-azure-functions>=1.17.0
-
 # Core Web & AI
 fastapi>=0.100.0
 uvicorn>=0.23.0
@@ -10,12 +7,10 @@ scipy>=1.10.0
 google-genai>=0.3.0
 opencv-python-headless>=4.8.0
 
-# OpenMMLab Core (optional - uncomment if needed)
-# openmim>=0.3.9
-# mmengine>=0.8.0
+# Pose Estimation (YOLO26)
+ultralytics>=8.3.0
 
-# --- HARDWARE DEPENDENT (Uncomment if needed, or install manually per CUDA version) ---
-# torch
-# torchvision
-# mmcv>=2.0.0
-# mmpose>=1.0.0
+# --- INSTALL MANUALLY (hardware-dependent, not pip-installable from this file) ---
+# torch and torchvision require CUDA-specific wheels.
+# For RTX 5080 / Blackwell (sm_120), use cu128 wheels:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128

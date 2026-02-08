@@ -1,8 +1,3 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Logs
 logs
 *.log
@@ -16,15 +11,6 @@ node_modules
 dist
 dist-ssr
 *.local
-.venv/
-__pycache__/
-
-# Azure Functions
-local.settings.json
-.python_packages/
-
-# Windows reserved names
-nul
 
 # Editor directories and files
 .vscode/*
@@ -36,4 +22,3 @@ nul
 *.njsproj
 *.sln
 *.sw?
-

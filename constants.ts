@@ -3,7 +3,7 @@ import { PipelineStage, StageConfig, ClinicalProfile, SkeletonFrame, Point3D } f
 
 export const STAGES: StageConfig[] = [
   { id: PipelineStage.INGESTION, label: "Ingestion", icon: "fa-video", description: "Video upload and preprocessing" },
-  { id: PipelineStage.LIFTING_3D, label: "ViTPose 3D", icon: "fa-cube", description: "ViTPose Transformer (SOTA) Pose Estimation" },
+  { id: PipelineStage.LIFTING_3D, label: "YOLO26 Pose", icon: "fa-cube", description: "YOLO26x Pose Estimation (Single-Stage)" },
   { id: PipelineStage.MOVEMENT_LAB, label: "Movement Lab", icon: "fa-flask", description: "Entropy, Fluency & Complexity analysis" },
   { id: PipelineStage.CLASSIFIER, label: "Diagnose", icon: "fa-user-md", description: "Hybrid Transformer-GCN Classification" },
   { id: PipelineStage.COMPLETE, label: "Results", icon: "fa-clipboard-check", description: "Clinical assessment report" }

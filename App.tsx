@@ -499,12 +499,12 @@ const App: React.FC = () => {
                             seizureDetected: backendData.report.classification === 'Seizures',
                             seizureType: "None",
                             rawData: { ...backendData.biomarkers, posture: {}, seizure: {} }, // simplified for demo
-                            clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (ViTPose)",
+                            clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (YOLO26)",
                             recommendations: ["Review backend logs"],
                             timelineData: backendData.metrics
                         };
                         
-                        const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live (ViTPose)` : file?.name || "Unknown");
+                        const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live (YOLO26)` : file?.name || "Unknown");
                         await new Promise(resolve => setTimeout(resolve, 500));
                         setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
                         return;

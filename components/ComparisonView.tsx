@@ -300,14 +300,14 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
             </button>
             <h2 className="text-lg font-semibold text-neutral-900">Comparative Analysis</h2>
          </div>
-         <label className="bg-neutral-900 hover:bg-neutral-800 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium flex items-center gap-2">
+         <label className="bg-neutral-900 hover:bg-neutral-800 text-white px-4 py-2 rounded-md cursor-pointer transition-colors text-sm font-medium flex items-center gap-2">
             <i className="fas fa-plus text-xs"></i> Add CSV
             <input type="file" multiple accept=".csv" className="hidden" onChange={handleFileUpload} />
          </label>
       </div>
 
       {datasets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 bg-white border border-dashed border-neutral-300 rounded-lg text-neutral-400">
+          <div className="flex flex-col items-center justify-center py-20 bg-white border border-dashed border-neutral-300 rounded-md text-neutral-400">
               <p className="text-sm mb-1">No datasets loaded</p>
               <p className="text-xs">Upload CSV files or select reports from the Dashboard to compare.</p>
           </div>
@@ -315,7 +315,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* Time Series */}
-            <div className="bg-white p-5 rounded-lg border border-neutral-200 col-span-1 lg:col-span-2">
+            <div className="bg-white p-5 rounded-md border border-neutral-200 col-span-1 lg:col-span-2">
                 <h3 className="text-sm font-medium text-neutral-900 mb-4">Entropy Time Series</h3>
                 <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -345,19 +345,19 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
             <div className="col-span-1 lg:col-span-2 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                 {/* AI Report */}
-                <div className="lg:col-span-2 bg-white p-5 rounded-lg border border-neutral-200 flex flex-col">
+                <div className="lg:col-span-2 bg-white p-5 rounded-md border border-neutral-200 flex flex-col">
                      <div className="flex justify-between items-center mb-4">
                         <h3 className="text-sm font-medium text-neutral-900">AI Analysis</h3>
                         <button
                           onClick={handleGenerateAIReport}
                           disabled={isGeneratingReport}
-                          className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                          className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 text-white rounded-md text-xs font-medium transition-colors"
                         >
                           {isGeneratingReport ? "Analyzing..." : "Generate"}
                         </button>
                     </div>
 
-                    <div className="bg-neutral-50 rounded-lg p-5 min-h-[200px] border border-neutral-100 flex-1">
+                    <div className="bg-neutral-50 rounded-md p-5 min-h-[200px] border border-neutral-100 flex-1">
                         {aiReport ? (
                           <div className="whitespace-pre-line leading-relaxed text-sm text-neutral-700">
                             {aiReport}
@@ -371,7 +371,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
                 </div>
 
                 {/* Chat */}
-                <div className="bg-white p-5 rounded-lg border border-neutral-200 flex flex-col h-[400px]">
+                <div className="bg-white p-5 rounded-md border border-neutral-200 flex flex-col h-[400px]">
                     <h3 className="text-sm font-medium text-neutral-900 mb-4">Ask AI</h3>
 
                     <div className="flex-1 overflow-y-auto mb-3 space-y-2.5 pr-1">
@@ -382,7 +382,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
                         )}
                         {chatHistory.map((msg, i) => (
                           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[85%] rounded-lg p-2.5 text-sm ${
+                            <div className={`max-w-[85%] rounded-md p-2.5 text-sm ${
                               msg.role === 'user'
                                 ? 'bg-neutral-900 text-white'
                                 : 'bg-neutral-100 text-neutral-700'
@@ -393,7 +393,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
                         ))}
                         {isChatLoading && (
                            <div className="flex justify-start">
-                             <div className="bg-neutral-100 rounded-lg p-2.5">
+                             <div className="bg-neutral-100 rounded-md p-2.5">
                                <i className="fas fa-circle-notch fa-spin text-neutral-400 text-xs"></i>
                              </div>
                            </div>
@@ -407,7 +407,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           placeholder="Ask about your data..."
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-lg py-2.5 pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/20 transition-colors text-neutral-800 placeholder-neutral-400"
+                          className="w-full bg-neutral-50 border border-neutral-200 rounded-md py-2.5 pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/20 transition-colors text-neutral-800 placeholder-neutral-400"
                         />
                         <button
                           type="submit"
@@ -421,7 +421,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
             </div>
 
             {/* Phase Space */}
-            <div className="bg-white p-5 rounded-lg border border-neutral-200">
+            <div className="bg-white p-5 rounded-md border border-neutral-200">
                 <h3 className="text-sm font-medium text-neutral-900 mb-4">Phase Space Overlay</h3>
                 <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -446,7 +446,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
             </div>
 
             {/* Bar Chart */}
-            <div className="bg-white p-5 rounded-lg border border-neutral-200">
+            <div className="bg-white p-5 rounded-md border border-neutral-200">
                  <h3 className="text-sm font-medium text-neutral-900 mb-4">Mean Velocity</h3>
                 <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -462,24 +462,24 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
             </div>
 
             {/* Report & Stats Table */}
-            <div id="printable-report" className="bg-white p-5 rounded-lg border border-neutral-200 col-span-1 lg:col-span-2">
+            <div id="printable-report" className="bg-white p-5 rounded-md border border-neutral-200 col-span-1 lg:col-span-2">
                 <div className="flex justify-between items-center mb-4 no-print">
                      <h3 className="text-sm font-medium text-neutral-900">Automated Report</h3>
                     <button
                         onClick={() => window.print()}
-                        className="bg-neutral-900 hover:bg-neutral-800 text-white px-4 py-2 rounded-lg transition-colors text-xs font-medium no-print"
+                        className="bg-neutral-900 hover:bg-neutral-800 text-white px-4 py-2 rounded-md transition-colors text-xs font-medium no-print"
                     >
                         Export PDF
                     </button>
                 </div>
 
                 {report && (
-                    <div className="mb-6 p-5 bg-neutral-50 rounded-lg border border-neutral-100 overflow-hidden">
+                    <div className="mb-6 p-5 bg-neutral-50 rounded-md border border-neutral-100 overflow-hidden">
                          <pre className="whitespace-pre-wrap font-mono text-xs text-neutral-600 leading-relaxed">{report}</pre>
                     </div>
                 )}
 
-                <div className="overflow-x-auto rounded-lg border border-neutral-100">
+                <div className="overflow-x-auto rounded-md border border-neutral-100">
                     <table className="w-full text-sm text-left text-neutral-600">
                         <thead className="text-[11px] text-neutral-500 uppercase bg-neutral-50">
                             <tr>

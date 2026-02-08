@@ -6,6 +6,10 @@ from typing import List, Dict, Any, Optional
 import json
 import os
 import time
+from dotenv import load_dotenv
+
+# Load .env from project root (one level up from server/)
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Physics Engine Port
 from .physics_engine import process_frames
@@ -56,7 +60,7 @@ class AnalysisResponse(BaseModel):
 
 # --- GEMINI SERVICE (Python Backend) ---
 def generate_gemini_report(biomarkers: Dict[str, Any]):
-    api_key = os.environ.get("API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"error": "API Key missing"}
         

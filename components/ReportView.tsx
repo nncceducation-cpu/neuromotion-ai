@@ -112,7 +112,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
       `}</style>
 
       {/* Classification Header */}
-      <div className="bg-white p-6 rounded-lg border border-neutral-200">
+      <div className="bg-white p-6 rounded-md border border-neutral-200">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
@@ -147,7 +147,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
 
       {/* Differential Diagnosis Alert */}
       {report.differentialAlert && (
-         <div className="bg-neutral-50 border border-neutral-200 p-4 rounded-lg flex items-start gap-3">
+         <div className="bg-neutral-50 border border-neutral-200 p-4 rounded-md flex items-start gap-3">
              <span className="text-neutral-400 mt-0.5 text-sm">i</span>
              <div>
                  <h4 className="font-medium text-neutral-900 text-sm">Differential Diagnosis</h4>
@@ -159,7 +159,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 break-inside-avoid">
 
         {/* Raw Data Analysis */}
-        <div className="bg-white p-6 rounded-lg border border-neutral-200">
+        <div className="bg-white p-6 rounded-md border border-neutral-200">
            <div className="flex items-center justify-between mb-6">
              <h3 className="text-sm font-semibold text-neutral-900">Raw Data Analysis</h3>
              <span className="text-[10px] text-neutral-400 font-mono">Physics Engine v6.0</span>
@@ -271,7 +271,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
 
              {/* Biomarker Mini Charts */}
              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-neutral-100">
-                <div className="p-3 border border-neutral-100 rounded-lg">
+                <div className="p-3 border border-neutral-100 rounded-md">
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="text-[11px] text-neutral-500">Entropy</div>
@@ -281,7 +281,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
                     {report.timelineData && <MiniChart data={report.timelineData} dataKey="entropy" color="#171717" />}
                 </div>
 
-                <div className="p-3 border border-neutral-100 rounded-lg">
+                <div className="p-3 border border-neutral-100 rounded-md">
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="text-[11px] text-neutral-500">Fluency</div>
@@ -291,7 +291,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
                     {report.timelineData && <MiniChart data={report.timelineData} dataKey="fluency_jerk" color="#525252" />}
                 </div>
 
-                <div className="p-3 border border-neutral-100 rounded-lg">
+                <div className="p-3 border border-neutral-100 rounded-md">
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="text-[11px] text-neutral-500">Complexity</div>
@@ -305,7 +305,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
         </div>
 
         {/* Recommendations */}
-        <div className="bg-white p-6 rounded-lg border border-neutral-200 flex flex-col">
+        <div className="bg-white p-6 rounded-md border border-neutral-200 flex flex-col">
           <div>
              <h4 className="font-semibold text-sm text-neutral-900 mb-4">Recommendations</h4>
              <ul className="space-y-2.5">
@@ -322,13 +322,13 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
 
       {/* Expert Training Section */}
       {onSaveCorrection && (
-        <div className="bg-white border border-neutral-200 rounded-lg p-6 no-print">
+        <div className="bg-white border border-neutral-200 rounded-md p-6 no-print">
             <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-sm text-neutral-900">Expert Review</h3>
                 {!isCorrecting ? (
                     <button
                         onClick={() => setIsCorrecting(true)}
-                        className="text-xs bg-white border border-neutral-200 text-neutral-600 px-3 py-1.5 rounded-lg hover:bg-neutral-50 hover:border-neutral-300 transition-colors"
+                        className="text-xs bg-white border border-neutral-200 text-neutral-600 px-3 py-1.5 rounded-md hover:bg-neutral-50 hover:border-neutral-300 transition-colors"
                     >
                         Correct Diagnosis
                     </button>
@@ -343,12 +343,12 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
             </div>
 
             {isCorrecting && (
-                <div className="bg-neutral-50 p-5 rounded-lg border border-neutral-200 animate-fade-in">
+                <div className="bg-neutral-50 p-5 rounded-md border border-neutral-200 animate-fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
                             <label className="block text-xs font-medium text-neutral-700 mb-1.5">Correct Diagnosis</label>
                             <select
-                                className="w-full p-2.5 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 outline-none bg-white text-sm"
+                                className="w-full p-2.5 border border-neutral-200 rounded-md focus:ring-2 focus:ring-neutral-900 outline-none bg-white text-sm"
                                 value={selectedCategory}
                                 onChange={(e) => setSelectedCategory(e.target.value as FMCategory)}
                             >
@@ -364,7 +364,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
                         <div>
                             <label className="block text-xs font-medium text-neutral-700 mb-1.5">Clinical Reasoning</label>
                             <textarea
-                                className="w-full p-2.5 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 outline-none text-sm h-24 bg-white"
+                                className="w-full p-2.5 border border-neutral-200 rounded-md focus:ring-2 focus:ring-neutral-900 outline-none text-sm h-24 bg-white"
                                 placeholder="Explain why the AI was incorrect..."
                                 value={notes}
                                 onChange={(e) => setNotes(e.target.value)}
@@ -374,7 +374,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
                     <div className="mt-4 flex justify-end">
                         <button
                             onClick={submitCorrection}
-                            className="bg-neutral-900 hover:bg-neutral-800 text-white px-6 py-2.5 rounded-lg font-medium text-sm transition-colors"
+                            className="bg-neutral-900 hover:bg-neutral-800 text-white px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
                         >
                             Save Correction
                         </button>
@@ -393,7 +393,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
         {onClose && (
             <button
                 onClick={onClose}
-                className="py-2.5 px-5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-50 font-medium transition-colors text-sm"
+                className="py-2.5 px-5 bg-white border border-neutral-200 text-neutral-600 rounded-md hover:bg-neutral-50 font-medium transition-colors text-sm"
             >
                 Back
             </button>
@@ -401,7 +401,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
         {report.timelineData && (
             <button
                 onClick={handleExportCSV}
-                className="py-2.5 px-5 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800 font-medium transition-colors text-sm"
+                className="py-2.5 px-5 bg-neutral-900 text-white rounded-md hover:bg-neutral-800 font-medium transition-colors text-sm"
             >
                 Export CSV
             </button>

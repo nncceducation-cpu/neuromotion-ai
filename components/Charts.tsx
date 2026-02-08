@@ -11,7 +11,7 @@ const chartTooltipStyle = { backgroundColor: '#171717', border: 'none', borderRa
 
 export const PhaseSpaceChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-64 w-full bg-white p-4 rounded-lg border border-neutral-200">
+    <div className="h-64 w-full bg-white p-4 rounded-md border border-neutral-200">
       <h3 className="text-neutral-900 text-xs font-medium mb-3 flex items-center justify-between">
         <span>Phase Space</span>
         <span className="text-[10px] text-neutral-400 font-normal">Variability</span>
@@ -47,7 +47,7 @@ export const PhaseSpaceChart: React.FC<ChartProps> = ({ data }) => {
 
 export const EntropyChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-64 w-full bg-white p-4 rounded-lg border border-neutral-200">
+    <div className="h-64 w-full bg-white p-4 rounded-md border border-neutral-200">
       <h3 className="text-neutral-900 text-xs font-medium mb-3 flex items-center justify-between">
         <span>Sample Entropy</span>
         <span className="text-[10px] text-neutral-400 font-normal">Predictability</span>
@@ -75,7 +75,7 @@ export const EntropyChart: React.FC<ChartProps> = ({ data }) => {
 
 export const FluencyChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-64 w-full bg-white p-4 rounded-lg border border-neutral-200">
+    <div className="h-64 w-full bg-white p-4 rounded-md border border-neutral-200">
       <h3 className="text-neutral-900 text-xs font-medium mb-3 flex items-center justify-between">
          <span>Fluency</span>
          <span className="text-[10px] text-neutral-400 font-normal">SAL Proxy</span>
@@ -97,7 +97,7 @@ export const FluencyChart: React.FC<ChartProps> = ({ data }) => {
 
 export const FractalChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-64 w-full bg-white p-4 rounded-lg border border-neutral-200">
+    <div className="h-64 w-full bg-white p-4 rounded-md border border-neutral-200">
       <h3 className="text-neutral-900 text-xs font-medium mb-3 flex items-center justify-between">
         <span>Fractal Dimension</span>
         <span className="text-[10px] text-neutral-400 font-normal">Complexity</span>
@@ -119,7 +119,7 @@ export const FractalChart: React.FC<ChartProps> = ({ data }) => {
 
 export const KineticEnergyChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-64 w-full bg-white p-4 rounded-lg border border-neutral-200">
+    <div className="h-64 w-full bg-white p-4 rounded-md border border-neutral-200">
       <h3 className="text-neutral-900 text-xs font-medium mb-3 flex items-center justify-between">
         <span>Kinetic Energy</span>
         <span className="text-[10px] text-neutral-400 font-normal">Rigid Body</span>
@@ -152,7 +152,7 @@ export const ConfidenceGauge: React.FC<{ value: number }> = ({ value }) => {
   ];
 
   return (
-    <div className="h-full w-full bg-white p-4 rounded-lg border border-neutral-200 flex flex-col items-center justify-center relative min-h-[200px]">
+    <div className="h-full w-full bg-white p-4 rounded-md border border-neutral-200 flex flex-col items-center justify-center relative min-h-[200px]">
        <h3 className="absolute top-4 left-4 text-neutral-500 text-xs font-medium">Confidence</h3>
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>

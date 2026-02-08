@@ -31,9 +31,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4">
-      <div className="bg-white p-8 rounded-lg border border-neutral-200 w-full max-w-sm">
+      <div className="bg-white p-8 rounded-md border border-neutral-200 w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-10 h-10 bg-neutral-900 rounded-lg flex items-center justify-center text-white font-semibold text-sm mx-auto mb-4">
+          <div className="w-10 h-10 bg-neutral-900 rounded-md flex items-center justify-center text-white font-semibold text-sm mx-auto mb-4">
             N
           </div>
           <h2 className="text-xl font-semibold text-neutral-900">
@@ -45,7 +45,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm rounded-lg">
+          <div className="mb-6 p-3 bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm rounded-md">
             {error}
           </div>
         )}
@@ -58,7 +58,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
+              className="w-full px-3 py-2 border border-neutral-200 rounded-md focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
               placeholder="doctor@clinic.com"
             />
           </div>
@@ -70,7 +70,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
+              className="w-full px-3 py-2 border border-neutral-200 rounded-md focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none transition-all text-sm"
               placeholder="••••••••"
             />
           </div>
@@ -78,13 +78,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-neutral-900 text-white py-2.5 rounded-lg font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="w-full bg-neutral-900 text-white py-2.5 rounded-md font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {isLoading ? <i className="fas fa-circle-notch fa-spin"></i> : 'Continue'}
           </button>
         </form>
 
-        <div className="mt-6 text-center p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <div className="mt-6 text-center p-3 bg-neutral-50 rounded-md border border-neutral-200">
           <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-medium mb-1">Demo Access</p>
           <p className="text-xs text-neutral-500 font-mono">demo@neuromotion.ai / demo</p>
         </div>

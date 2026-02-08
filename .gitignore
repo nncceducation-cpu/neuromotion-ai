@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Model weights (too large for GitHub)
+*.pt
+*.pth
+
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

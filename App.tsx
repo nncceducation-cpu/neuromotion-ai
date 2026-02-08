@@ -177,7 +177,7 @@ const VideoOverlay: React.FC<{
                             {Object.values(j).map((val, i) => {
                                 const pt = val as Point3D | undefined;
                                 return (pt && (pt.visibility || 1) > 0.5) && (
-                                <circle key={i} cx={pt.x} cy={pt.y} r="0.8" fill={i < 11 ? '#ef4444' : i % 2 === 0 ? '#f97316' : '#06b6d4'} />
+                                <circle key={i} cx={pt.x} cy={pt.y} r="0.8" fill="#ffffff" />
                             )})}
                             {activeJointPt && (isSeizureBand || isTremorBand) && (
                                 <>
@@ -190,8 +190,8 @@ const VideoOverlay: React.FC<{
                 })()}
             </svg>
             {stage !== PipelineStage.INGESTION && (
-                <div className="absolute top-4 left-4 bg-black/60 backdrop-blur text-white px-3 py-1 rounded-full text-xs font-mono flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${isCapturing ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
+                <div className="absolute top-4 left-4 bg-black/60 backdrop-blur text-white px-3 py-1 rounded-md text-xs font-mono flex items-center gap-2">
+                    <div className={`w-1.5 h-1.5 rounded-full ${isCapturing ? 'bg-white animate-pulse' : 'bg-neutral-400'}`}></div>
                     {isCapturing ? 'PROCESSING VISION...' : 'PLAYBACK'}
                 </div>
             )}
@@ -200,9 +200,10 @@ const VideoOverlay: React.FC<{
                      {(() => {
                          const isSeizure = rhythmStats.freq >= 1.5 && rhythmStats.freq <= 5.0 && rhythmStats.amp > 2.0;
                          return (
-                             <div className={`px-4 py-2 rounded-lg backdrop-blur border ${isSeizure ? 'bg-red-900/80 border-red-500 text-white' : 'bg-yellow-900/80 border-yellow-500 text-white'}`}>
-                                 <div className="text-[10px] font-bold uppercase tracking-wider mb-1">
-                                     {isSeizure ? '⚠️ RHYTHMIC BURST (SEIZURE BAND)' : '⚡ TREMOR ACTIVITY'}
+                             <div className={`px-4 py-2 rounded-md backdrop-blur border bg-neutral-900/90 border-neutral-500 text-white`}>
+                                 <div className="text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                     <div className={`w-1.5 h-1.5 rounded-full ${isSeizure ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                                     {isSeizure ? 'RHYTHMIC BURST (SEIZURE BAND)' : 'TREMOR ACTIVITY'}
                                  </div>
                                  <div className="flex items-end gap-2">
                                      <span className="text-2xl font-mono font-bold">{rhythmStats.freq.toFixed(1)}</span>
@@ -218,15 +219,15 @@ const VideoOverlay: React.FC<{
                 </div>
             )}
             {isLive && stage === PipelineStage.INGESTION && (
-                <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur px-4 py-2 rounded-lg text-white border border-white/20 shadow-lg">
-                    <div className="text-[10px] uppercase font-bold text-slate-300 mb-1 flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur px-4 py-2 rounded-md text-white border border-white/10">
+                    <div className="text-[10px] uppercase font-medium text-neutral-300 mb-1 flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
                         Live Monitor Active
                     </div>
                     <div className="font-mono text-xl font-bold tracking-widest">
                         {timeRemaining || "05:00"}
                     </div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">Until next auto-assessment</div>
+                    <div className="text-[9px] text-neutral-400 mt-0.5">Until next auto-assessment</div>
                 </div>
             )}
         </div>
@@ -549,47 +550,47 @@ const App: React.FC = () => {
   }, [isLive, stage, isCapturing, nextAutoScan, runAnalysis]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm no-print">
-         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-neutral-50 text-neutral-800 font-sans">
+      <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-neutral-200 no-print">
+         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('dashboard')}>
-                <div className="bg-sky-500 w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold shadow-sky-200 shadow-lg">N</div>
-                <span className="font-bold text-lg tracking-tight text-slate-800">NeuroMotion AI</span>
+                <div className="bg-neutral-900 w-7 h-7 rounded-md flex items-center justify-center text-white font-semibold text-xs">N</div>
+                <span className="font-semibold text-sm tracking-tight text-neutral-900">NeuroMotion AI</span>
             </div>
-            <div className="flex items-center gap-4">
-               <button 
+            <div className="flex items-center gap-3">
+               <button
                   onClick={() => setUseBackend(!useBackend)}
-                  className={`text-xs px-3 py-1 rounded-full font-bold border flex items-center transition-all ${useBackend ? 'bg-emerald-100 text-emerald-700 border-emerald-300 shadow-emerald-200 shadow-md' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                  className={`text-xs px-3 py-1 rounded-md font-medium border flex items-center transition-all ${useBackend ? 'bg-neutral-100 text-neutral-700 border-neutral-300' : 'bg-white text-neutral-400 border-neutral-200'}`}
                >
                    <i className={`fas ${useBackend ? 'fa-server' : 'fa-laptop'} mr-2`}></i>
-                   {useBackend ? 'Server Mode (ViTPose)' : 'Local Mode (Browser)'}
+                   {useBackend ? 'Server Mode' : 'Local Mode'}
                </button>
-               {appMode === 'training' && ( <div className="bg-indigo-600 text-white text-xs px-3 py-1 rounded-full font-bold flex items-center shadow-lg shadow-indigo-200"><i className="fas fa-graduation-cap mr-2"></i> Training Mode Active</div> )}
+               {appMode === 'training' && ( <div className="bg-neutral-900 text-white text-xs px-3 py-1 rounded-md font-medium flex items-center"><i className="fas fa-graduation-cap mr-2"></i> Training</div> )}
                <div className="flex items-center gap-2">
-                   <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-sm font-bold">{user.name.charAt(0)}</div>
-                   <span className="text-sm font-medium hidden md:block">{user.name}</span>
+                   <div className="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-500 text-xs font-semibold">{user.name.charAt(0)}</div>
+                   <span className="text-sm font-medium hidden md:block text-neutral-700">{user.name}</span>
                </div>
-               <button onClick={() => { storageService.logout(); window.location.reload(); }} className="text-slate-400 hover:text-slate-600"><i className="fas fa-sign-out-alt"></i></button>
+               <button onClick={() => { storageService.logout(); window.location.reload(); }} className="text-neutral-400 hover:text-neutral-600 transition-colors"><i className="fas fa-sign-out-alt text-sm"></i></button>
             </div>
          </div>
       </header>
-      <main className="pt-24 pb-12 px-4 max-w-7xl mx-auto">
+      <main className="pt-20 pb-12 px-4 max-w-7xl mx-auto">
          {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
          {view === 'comparison' && ( <ComparisonView onBack={() => setView('dashboard')} initialReports={reportsToCompare} /> )}
          {view === 'view_report' && selectedReport && ( <ReportView report={selectedReport} onClose={() => setView('dashboard')} onSaveCorrection={handleSaveCorrection} /> )}
          {view === 'pipeline' && (
              <div className="animate-fade-in">
                 <div className="mb-6 flex items-center justify-between no-print">
-                    <button onClick={() => setView('dashboard')} className="text-slate-500 hover:text-slate-800 flex items-center gap-2 transition-colors"><i className="fas fa-arrow-left"></i> Back to Dashboard</button>
-                    {appMode === 'training' && ( <div className="text-sm text-indigo-600 font-bold">Step 1: Upload & Diagnose (Expert) -> Step 2: AI Analysis & Optimization</div> )}
+                    <button onClick={() => setView('dashboard')} className="text-neutral-400 hover:text-neutral-800 flex items-center gap-2 transition-colors text-sm"><i className="fas fa-arrow-left"></i> Back to Dashboard</button>
+                    {appMode === 'training' && ( <div className="text-sm text-neutral-500 font-medium">Step 1: Upload & Diagnose (Expert) &rarr; Step 2: AI Analysis & Optimization</div> )}
                 </div>
                 {appMode === 'training' && stage === PipelineStage.INGESTION && (
-                    <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 mb-8">
-                        <h3 className="text-indigo-900 font-bold mb-4 flex items-center"><i className="fas fa-clipboard-check mr-2"></i> Expert Ground Truth Input</h3>
+                    <div className="bg-neutral-50 border border-neutral-200 rounded-md p-6 mb-8">
+                        <h3 className="text-neutral-900 font-semibold mb-4 flex items-center text-sm"><i className="fas fa-clipboard-check mr-2 text-neutral-400"></i> Expert Ground Truth Input</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-bold uppercase text-indigo-800 mb-1">Diagnosis</label>
-                                <select className="w-full p-2 rounded border border-indigo-200" onChange={(e) => setSelectedExpertDiagnosis(e.target.value)}>
+                                <label className="block text-xs font-medium uppercase text-neutral-700 mb-1">Diagnosis</label>
+                                <select className="w-full p-2 rounded-md border border-neutral-200 text-sm focus:ring-2 focus:ring-neutral-900 outline-none" onChange={(e) => setSelectedExpertDiagnosis(e.target.value)}>
                                     <option value="">Select Diagnosis...</option>
                                     <option value="Normal">Normal</option>
                                     <option value="Sarnat Stage I">Sarnat Stage I</option>
@@ -599,8 +600,8 @@ const App: React.FC = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-bold uppercase text-indigo-800 mb-1">Notes</label>
-                                <input className="w-full p-2 rounded border border-indigo-200" placeholder="E.g. High frequency tremor noted..." onChange={(e) => setExpertAnnotation(e.target.value)} />
+                                <label className="block text-xs font-medium uppercase text-neutral-700 mb-1">Notes</label>
+                                <input className="w-full p-2 rounded-md border border-neutral-200 text-sm focus:ring-2 focus:ring-neutral-900 outline-none" placeholder="E.g. High frequency tremor noted..." onChange={(e) => setExpertAnnotation(e.target.value)} />
                             </div>
                         </div>
                     </div>
@@ -609,23 +610,23 @@ const App: React.FC = () => {
                 {stage === PipelineStage.COMPLETE && report ? ( <ReportView report={report} onClose={() => setView('dashboard')} onSaveCorrection={handleSaveCorrection} /> ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
                         <div className="lg:col-span-2 space-y-4 flex flex-col items-center">
-                            <div className="relative bg-black rounded-2xl overflow-hidden shadow-xl group w-auto inline-block">
+                            <div className="relative bg-black rounded-md overflow-hidden group w-auto inline-block border border-neutral-200">
                                 <video ref={videoRef} className="block max-h-[75vh] w-auto max-w-full" src={videoPreview || undefined} controls={stage === PipelineStage.COMPLETE || stage === PipelineStage.INGESTION} playsInline muted />
                                 {stage !== PipelineStage.INGESTION && stage !== PipelineStage.IDLE && ( <VideoOverlay videoRef={videoRef} rawFrames={rawFrames} realTimeSkeleton={realTimeSkeleton} isCapturing={isCapturing} isLive={isLive} stage={stage} timeRemaining={timeRemaining} /> )}
                                 {stage === PipelineStage.INGESTION && !videoPreview && !isLive && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-slate-900/50">
-                                        <i className="fas fa-cloud-upload-alt text-5xl mb-4 opacity-80"></i>
-                                        <label className="bg-sky-500 hover:bg-sky-400 px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-neutral-900/60">
+                                        <i className="fas fa-cloud-upload-alt text-4xl mb-4 opacity-70"></i>
+                                        <label className="bg-white text-neutral-900 hover:bg-neutral-100 px-6 py-2 rounded-md cursor-pointer transition-colors font-medium text-sm">
                                             Select Video File
                                             <input type="file" className="hidden" accept="video/*" onChange={handleFileUpload} />
                                         </label>
-                                        <p className="mt-4 text-sm opacity-60">Supported formats: MP4, MOV, WEBM</p>
-                                        {useBackend && <div className="mt-2 text-xs text-emerald-300 font-mono">Server Mode Active (ViTPose)</div>}
+                                        <p className="mt-4 text-sm opacity-50">Supported formats: MP4, MOV, WEBM</p>
+                                        {useBackend && <div className="mt-2 text-xs text-neutral-300 font-mono">Server Mode Active</div>}
                                     </div>
                                 )}
                             </div>
                             {stage === PipelineStage.INGESTION && (videoPreview || isLive) && (
-                                <button onClick={runAnalysis} className="w-full py-4 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-lg shadow-xl shadow-sky-900/20 transition-all transform active:scale-95 flex items-center justify-center gap-3">
+                                <button onClick={runAnalysis} className="w-full py-3 bg-neutral-900 hover:bg-neutral-800 text-white rounded-md font-medium text-sm transition-colors flex items-center justify-center gap-3">
                                     {isCapturing ? ( <><i className="fas fa-circle-notch fa-spin"></i> Analyzing ({useBackend ? 'Server' : 'Local'})...</> ) : ( <><i className="fas fa-play"></i> Run Clinical Analysis</> )}
                                 </button>
                             )}
@@ -643,29 +644,29 @@ const App: React.FC = () => {
       </main>
       {showTrainingModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <h3 className="text-xl font-bold text-slate-800"><i className="fas fa-brain text-purple-600 mr-2"></i> {trainingStatus === 'complete' ? 'Optimization Complete' : 'Expert Training'}</h3>
-                    <button onClick={closeTrainingModal} className="text-slate-400 hover:text-slate-600"><i className="fas fa-times"></i></button>
+            <div className="bg-white rounded-md shadow-lg max-w-2xl w-full overflow-hidden border border-neutral-200">
+                <div className="p-6 border-b border-neutral-100 flex justify-between items-center bg-neutral-50">
+                    <h3 className="text-lg font-semibold text-neutral-900"><i className="fas fa-brain text-neutral-400 mr-2"></i> {trainingStatus === 'complete' ? 'Optimization Complete' : 'Expert Training'}</h3>
+                    <button onClick={closeTrainingModal} className="text-neutral-400 hover:text-neutral-600"><i className="fas fa-times"></i></button>
                 </div>
                 <div className="p-6">
                     {trainingStatus === 'analyzing' ? (
-                        <div className="text-center py-12"><i className="fas fa-microchip text-4xl text-sky-500 animate-bounce mb-4"></i><h4 className="text-lg font-bold text-slate-700">Refining Physics Engine...</h4><p className="text-slate-500">The AI is adjusting signal thresholds based on your feedback.</p></div>
+                        <div className="text-center py-12"><i className="fas fa-microchip text-4xl text-neutral-300 animate-pulse mb-4"></i><h4 className="text-lg font-semibold text-neutral-900">Refining Physics Engine...</h4><p className="text-neutral-500 text-sm">The AI is adjusting signal thresholds based on your feedback.</p></div>
                     ) : trainingStatus === 'complete' && prevConfig && motionConfig ? (
                         <div className="space-y-6">
-                            <div className="bg-green-50 text-green-800 p-4 rounded-lg flex items-start gap-3"><i className="fas fa-check-circle mt-1 text-green-600"></i><div><h4 className="font-bold">Algorithm Updated</h4><p className="text-sm">New parameters have been saved to memory.</p></div></div>
-                            <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300">
-                                <div className="grid grid-cols-3 border-b border-slate-700 pb-2 mb-2 font-bold text-slate-500"><div>PARAMETER</div><div>WAS</div><div>NOW</div></div>
-                                {Object.entries(motionConfig).map(([key, val]) => { const old = (prevConfig as any)[key]; if (typeof val !== 'number') return null; const diff = val - old; const changed = Math.abs(diff) > 0.001; return ( <div key={key} className={`grid grid-cols-3 py-1 ${changed ? 'text-white bg-white/5' : 'opacity-50'}`}><div>{key}</div><div>{Number(old).toFixed(2)}</div><div className={changed ? (diff > 0 ? 'text-green-400' : 'text-red-400') : ''}>{Number(val).toFixed(2)} {changed && ` (${diff > 0 ? '+' : ''}${diff.toFixed(2)})`}</div></div> ); })}
+                            <div className="bg-neutral-50 text-neutral-800 p-4 rounded-md flex items-start gap-3 border border-neutral-200"><i className="fas fa-check-circle mt-1 text-neutral-400"></i><div><h4 className="font-semibold text-sm">Algorithm Updated</h4><p className="text-sm text-neutral-500">New parameters have been saved to memory.</p></div></div>
+                            <div className="bg-neutral-900 rounded-md p-4 text-xs font-mono text-neutral-300">
+                                <div className="grid grid-cols-3 border-b border-neutral-700 pb-2 mb-2 font-medium text-neutral-500"><div>PARAMETER</div><div>WAS</div><div>NOW</div></div>
+                                {Object.entries(motionConfig).map(([key, val]) => { const old = (prevConfig as any)[key]; if (typeof val !== 'number') return null; const diff = val - old; const changed = Math.abs(diff) > 0.001; return ( <div key={key} className={`grid grid-cols-3 py-1 ${changed ? 'text-white bg-white/5' : 'opacity-50'}`}><div>{key}</div><div>{Number(old).toFixed(2)}</div><div className={changed ? 'text-white' : ''}>{Number(val).toFixed(2)} {changed && ` (${diff > 0 ? '+' : ''}${diff.toFixed(2)})`}</div></div> ); })}
                             </div>
-                            <button onClick={closeTrainingModal} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-lg font-bold">Close & Save Results</button>
+                            <button onClick={closeTrainingModal} className="w-full bg-neutral-900 hover:bg-neutral-800 text-white py-3 rounded-md font-medium text-sm">Close & Save Results</button>
                         </div>
                     ) : ( <div><p>Initializing...</p></div> )}
                 </div>
             </div>
         </div>
       )}
-      {error && ( <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 z-[200] animate-bounce"><i className="fas fa-exclamation-circle"></i>{error}<button onClick={() => setError(null)} className="ml-2 opacity-80 hover:opacity-100"><i className="fas fa-times"></i></button></div> )}
+      {error && ( <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-neutral-900 text-white px-5 py-3 rounded-md shadow-lg flex items-center gap-3 z-[200] text-sm"><div className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></div>{error}<button onClick={() => setError(null)} className="ml-2 opacity-70 hover:opacity-100"><i className="fas fa-times text-xs"></i></button></div> )}
     </div>
   );
 };

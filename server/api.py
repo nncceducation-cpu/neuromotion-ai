@@ -35,6 +35,8 @@ try:
     import google.genai.types as types
 except ImportError:
     print("Warning: Google GenAI SDK not found. Install google-genai.")
+    Client = None  # type: ignore[assignment,misc]
+    types = None  # type: ignore[assignment]
 
 # 3b. YOLO26 POSE IMPORT (optional — graceful fallback if not installed)
 try:
@@ -192,6 +194,10 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
         print("Error: GEMINI_API_KEY not found in environment variables.")
         return {"error": "API Key missing"}
 
+    if Client is None or types is None:
+        print("Error: Google GenAI SDK not installed.")
+        return {"error": "Google GenAI SDK not installed"}
+
     try:
         client = Client(api_key=api_key)
 
@@ -246,6 +252,8 @@ Input: {json.dumps(biomarkers, indent=2)}
         )
 
         # Parse response and ensure it has the required fields
+        if response.text is None:
+            return {"classification": "Error", "confidence": 0.0, "reasoning": "Gemini returned empty response"}
         result = json.loads(response.text)
 
         # Validate schema (basic sanity check)

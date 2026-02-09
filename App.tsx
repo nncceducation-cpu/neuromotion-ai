@@ -270,7 +270,7 @@ const App: React.FC = () => {
   const [timeRemaining, setTimeRemaining] = useState<string>("");
 
   // --- NEW: SERVER MODE STATE ---
-  const [useBackend, setUseBackend] = useState(false);
+  const [useBackend, setUseBackend] = useState(true);
 
   useEffect(() => {
     const savedConfig = localStorage.getItem(`motionConfig_${user.id}`);
@@ -447,6 +447,56 @@ const App: React.FC = () => {
 
   const runAnalysis = useCallback(async () => {
     if ((!file && !isLive) || !user || !holistic) { if (!holistic) setError("Vision model loading..."); return; }
+
+    // --- YOLO26 GPU PIPELINE: Send raw video file to backend ---
+    if (useBackend && file && !isLive) {
+      try {
+        setStage(PipelineStage.LIFTING_3D);
+        setIsCapturing(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        setStage(PipelineStage.MOVEMENT_LAB);
+        const response = await fetch(`${SERVER_URL}/upload_video`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errBody = await response.json().catch(() => ({ detail: 'Server error' }));
+          throw new Error(errBody.detail || 'Backend Error');
+        }
+
+        const backendData = await response.json();
+
+        if (backendData.metrics) {
+          setChartData(backendData.metrics);
+          setStage(PipelineStage.CLASSIFIER);
+          const completeReport: AnalysisReport = {
+            classification: backendData.report.classification || "Normal",
+            confidence: Math.round((backendData.report.confidence || 1) * 100),
+            seizureDetected: backendData.report.classification === 'Seizures',
+            seizureType: "None",
+            rawData: { ...backendData.biomarkers, posture: {}, seizure: {} },
+            clinicalAnalysis: backendData.report.reasoning || "Analysis via YOLO26 GPU Pipeline",
+            recommendations: backendData.report.recommendations ? [backendData.report.recommendations] : ["Review backend logs"],
+            timelineData: backendData.metrics
+          };
+
+          const savedReport = storageService.saveReport(user.id, completeReport, file.name);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
+        }
+      } catch (err) {
+        console.warn("YOLO26 GPU pipeline failed, falling back to local JS", err);
+        setError(`Server error: ${err instanceof Error ? err.message : 'Unknown'}. Switching to Local Mode.`);
+        setUseBackend(false);
+      } finally {
+        setIsCapturing(false);
+      }
+      return;
+    }
 
     try {
       setStage(PipelineStage.LIFTING_3D);

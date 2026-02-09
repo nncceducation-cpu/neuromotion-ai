@@ -57,7 +57,7 @@ def load_models() -> bool:
 
     try:
         import torch
-        from ultralytics import YOLO
+        from ultralytics import YOLO  # type: ignore[attr-defined]
 
         DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -166,7 +166,7 @@ def process_video(
         timestamp = i * dt
 
         # YOLO26 does detection + pose in a single forward pass
-        results = _model(frame_bgr, verbose=False, conf=det_score_threshold)
+        results = _model(frame_bgr, verbose=False, conf=det_score_threshold)  # type: ignore[misc]
         result = results[0]
 
         # Skip if no persons detected

@@ -139,7 +139,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onClose, onSaveC
                   </div>
               )}
           </div>
-          <div className="w-28 h-28">
+          <div className="w-32 h-32">
                <ConfidenceGauge value={report.expertCorrection ? 100 : report.confidence} />
           </div>
         </div>

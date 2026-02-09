@@ -152,29 +152,31 @@ export const ConfidenceGauge: React.FC<{ value: number }> = ({ value }) => {
   ];
 
   return (
-    <div className="h-full w-full bg-white p-4 rounded-md border border-neutral-200 flex flex-col items-center justify-center relative min-h-[200px]">
-       <h3 className="absolute top-4 left-4 text-neutral-500 text-xs font-medium">Confidence</h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="70%"
-            startAngle={180}
-            endAngle={0}
-            innerRadius={60}
-            outerRadius={80}
-            paddingAngle={5}
-            dataKey="value"
-          >
-            <Cell key="cell-0" fill={value > 70 ? '#171717' : value > 40 ? '#737373' : '#a3a3a3'} />
-            <Cell key="cell-1" fill="#f5f5f5" />
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="absolute bottom-4 text-center">
-        <div className="text-2xl font-semibold text-neutral-900">{value}%</div>
-        <div className="text-[10px] text-neutral-400">Certainty</div>
+    <div className="h-full w-full bg-white p-3 rounded-md border border-neutral-200 flex flex-col items-center relative">
+       <h3 className="text-neutral-500 text-[10px] font-medium mb-1">Confidence</h3>
+      <div className="flex-1 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="65%"
+              startAngle={180}
+              endAngle={0}
+              innerRadius="50%"
+              outerRadius="80%"
+              paddingAngle={3}
+              dataKey="value"
+            >
+              <Cell key="cell-0" fill={value > 70 ? '#171717' : value > 40 ? '#737373' : '#a3a3a3'} />
+              <Cell key="cell-1" fill="#f5f5f5" />
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="text-center -mt-3">
+        <div className="text-lg font-semibold text-neutral-900">{value}%</div>
+        <div className="text-[9px] text-neutral-400">Certainty</div>
       </div>
     </div>
   );

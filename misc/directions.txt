@@ -37,6 +37,36 @@ Open a terminal at the project root (c:\neuromotion-ai).
       python -c "import torch; print(torch.cuda.is_available())"
 
 -------------------------------------------------------------------------------
+  ACTIVATING THE VIRTUAL ENVIRONMENT (.venv)
+-------------------------------------------------------------------------------
+
+The virtual environment lives at the project root: .venv\
+
+Before running any backend commands, you must activate it. The activation
+command depends on which terminal you are using:
+
+  PowerShell (default in VS Code and Windows Terminal):
+      .venv\Scripts\Activate.ps1
+
+      If you get an "execution policy" error, run this first (one-time):
+          Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+  Command Prompt (cmd.exe):
+      .venv\Scripts\activate.bat
+
+  Git Bash / MSYS2 / WSL:
+      source .venv/Scripts/activate
+
+When activated, your prompt will show (.venv) at the beginning, e.g.:
+      (.venv) PS C:\neuromotion-ai\server>
+
+To deactivate (return to system Python), just type:
+      deactivate
+
+IMPORTANT: Only one .venv folder should exist, at the project root.
+Do NOT create additional venvs inside server/ or elsewhere.
+
+-------------------------------------------------------------------------------
   RUNNING THE APP
 -------------------------------------------------------------------------------
 
@@ -44,7 +74,9 @@ You need TWO terminals open:
 
   Terminal 1 - Backend (from project root):
       cd server
-      ..\.venv\Scripts\activate
+      ..\.venv\Scripts\Activate.ps1        (PowerShell)
+      ..\.venv\Scripts\activate.bat         (cmd.exe)
+      source ../.venv/Scripts/activate      (Git Bash)
       uvicorn api:app --reload --port 8000
 
   Terminal 2 - Frontend (from project root):

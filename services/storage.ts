@@ -16,7 +16,7 @@ export const storageService = {
     if (existing) throw new Error('Email already registered');
 
     const newUser = {
-      id: crypto.randomUUID(),
+      id: (typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       name,
       email,
       password // In a real app, hash this!
@@ -67,7 +67,7 @@ export const storageService = {
     
     const newReport: SavedReport = {
       ...report,
-      id: crypto.randomUUID(),
+      id: (typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       date: new Date().toISOString(),
       videoName
     };
@@ -81,6 +81,13 @@ export const storageService = {
   getReports: (userId: string): SavedReport[] => {
     const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
     return reportsMap[userId] || [];
+  },
+
+  deleteReport: (userId: string, reportId: string): void => {
+    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
+    const userReports: SavedReport[] = reportsMap[userId] || [];
+    reportsMap[userId] = userReports.filter(r => r.id !== reportId);
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportsMap));
   },
 
   // --- Expert Feedback Loop ---

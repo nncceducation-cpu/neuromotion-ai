@@ -36,6 +36,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
     onCompareReports(selected);
   };
 
+  const handleDelete = (e: React.MouseEvent, reportId: string) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this assessment? This cannot be undone.')) return;
+    storageService.deleteReport(user.id, reportId);
+    setReports(prev => prev.filter(r => r.id !== reportId));
+    setSelectedIds(prev => { const next = new Set(prev); next.delete(reportId); return next; });
+  };
+
   const handleExportCSV = (e: React.MouseEvent, report: SavedReport) => {
     e.stopPropagation();
     if (!report.timelineData || report.timelineData.length === 0) {
@@ -185,6 +193,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
                                             <i className="fas fa-download text-xs"></i>
                                         </button>
                                     )}
+                                    <button
+                                        onClick={(e) => handleDelete(e, report.id)}
+                                        className="w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                                        title="Delete assessment"
+                                    >
+                                        <i className="fas fa-trash-alt text-xs"></i>
+                                    </button>
                                     <i className="fas fa-chevron-right text-neutral-300 text-xs group-hover:text-neutral-500 transition-colors"></i>
                                 </div>
                             </div>

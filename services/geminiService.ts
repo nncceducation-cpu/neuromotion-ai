@@ -194,7 +194,7 @@ export const refineModelParameters = async (
   currentConfig: MotionConfig
 ): Promise<MotionConfig> => {
    
-   const model = "gemini-2.5-flash"; // Fast model for parameter tuning
+   const model = "gemini-3-pro-preview";
 
    const prompt = `
      You are a Senior Computer Vision Engineer optimizing a physics-based motor assessment algorithm for neonates.

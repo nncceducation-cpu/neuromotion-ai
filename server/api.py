@@ -246,7 +246,7 @@ Input: {json.dumps(biomarkers, indent=2)}
 """
 
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3-pro-preview',
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type='application/json')
         )
@@ -297,6 +297,9 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
     # Extract aggregates safely
     ents = [m.get('entropy', 0) for m in metrics]
     jerks = [m.get('fluency_jerk', 0) for m in metrics]
+    fractals = [m.get('fractal_dim', 0) for m in metrics]
+    kes = [m.get('kinetic_energy', 0) for m in metrics]
+    rss = [m.get('root_stress', 0) for m in metrics]
 
     if not ents:
         return {"error": "No entropy data", "metrics": metrics}
@@ -305,6 +308,10 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
         "average_sample_entropy": float(np.mean(ents)),
         "peak_sample_entropy": float(np.max(ents)),
         "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
+        "average_fractal_dimension": float(np.mean(fractals)),
+        "peak_fractal_dimension": float(np.max(fractals)),
+        "average_kinetic_energy": float(np.mean(kes)),
+        "average_root_stress": float(np.mean(rss)),
         "backend_source": "Python/YOLO26-Pipeline"
     }
 
@@ -370,10 +377,17 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
 
         ents = [m.get('entropy', 0) for m in metrics]
         jerks = [m.get('fluency_jerk', 0) for m in metrics]
+        fractals = [m.get('fractal_dim', 0) for m in metrics]
+        kes = [m.get('kinetic_energy', 0) for m in metrics]
+        rss = [m.get('root_stress', 0) for m in metrics]
         biomarkers = {
             "average_sample_entropy": float(np.mean(ents)),
             "peak_sample_entropy": float(np.max(ents)),
             "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
+            "average_fractal_dimension": float(np.mean(fractals)),
+            "peak_fractal_dimension": float(np.max(fractals)),
+            "average_kinetic_energy": float(np.mean(kes)),
+            "average_root_stress": float(np.mean(rss)),
             "backend_source": "Python/YOLO26-Pipeline",
             "frames_processed": len(skeleton_frames)
         }

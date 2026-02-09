@@ -446,7 +446,12 @@ const App: React.FC = () => {
   };
 
   const runAnalysis = useCallback(async () => {
-    if ((!file && !isLive) || !user || !holistic) { if (!holistic) setError("Vision model loading..."); return; }
+    console.log('[DEBUG] runAnalysis called', { file: file?.name, isLive, user: !!user, holistic: !!holistic, useBackend, stage });
+    if ((!file && !isLive) || !user || !holistic) {
+      console.warn('[DEBUG] Early return — missing:', { file: !!file, isLive, user: !!user, holistic: !!holistic });
+      if (!holistic) setError("Vision model loading...");
+      return;
+    }
 
     // --- YOLO26 GPU PIPELINE: Send raw video file to backend ---
     if (useBackend && file && !isLive) {
@@ -458,27 +463,54 @@ const App: React.FC = () => {
         formData.append('file', file);
 
         setStage(PipelineStage.MOVEMENT_LAB);
+        console.log('[DEBUG] Uploading video to backend:', `${SERVER_URL}/upload_video`);
         const response = await fetch(`${SERVER_URL}/upload_video`, {
           method: 'POST',
           body: formData
         });
 
+        console.log('[DEBUG] Backend response status:', response.status);
         if (!response.ok) {
           const errBody = await response.json().catch(() => ({ detail: 'Server error' }));
+          console.error('[DEBUG] Backend error body:', errBody);
           throw new Error(errBody.detail || 'Backend Error');
         }
 
         const backendData = await response.json();
+        console.log('[DEBUG] Backend response data:', JSON.stringify(backendData).slice(0, 500));
 
         if (backendData.metrics) {
+          console.log('[DEBUG] Got', backendData.metrics.length, 'metrics from backend');
           setChartData(backendData.metrics);
           setStage(PipelineStage.CLASSIFIER);
+
+          // Compute aggregate rawData fields from per-frame metrics
+          const m = backendData.metrics as any[];
+          console.log('[DEBUG] Sample metric keys:', Object.keys(m[0] || {}));
+          console.log('[DEBUG] Sample metric[0]:', JSON.stringify(m[0]));
+          const avgEntropy = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.entropy) || 0), 0) / m.length : 0;
+          const avgFluency = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.fluency_jerk) || 0), 0) / m.length : 0;
+          const avgFractal = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.fractal_dim) || 0), 0) / m.length : 0;
+          const avgKE = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.kinetic_energy) || 0), 0) / m.length : 0;
+          const avgRS = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.root_stress) || 0), 0) / m.length : 0;
+          console.log('[DEBUG] Computed averages:', { avgEntropy, avgFluency, avgFractal, avgKE, avgRS });
+
           const completeReport: AnalysisReport = {
             classification: backendData.report.classification || "Normal",
             confidence: Math.round((backendData.report.confidence || 1) * 100),
             seizureDetected: backendData.report.classification === 'Seizures',
             seizureType: "None",
-            rawData: { ...backendData.biomarkers, posture: {}, seizure: {} },
+            rawData: {
+              entropy: avgEntropy,
+              fluency: avgFluency,
+              complexity: avgFractal,
+              variabilityIndex: 0,
+              csRiskScore: 0,
+              avg_kinetic_energy: avgKE,
+              avg_root_stress: avgRS,
+              posture: { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal' as const, frog_leg_score: 0, spontaneous_activity: 0, sustained_posture_score: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 },
+              seizure: { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0, calculated_type: 'None' as const }
+            },
             clinicalAnalysis: backendData.report.reasoning || "Analysis via YOLO26 GPU Pipeline",
             recommendations: backendData.report.recommendations ? [backendData.report.recommendations] : ["Review backend logs"],
             timelineData: backendData.metrics
@@ -489,7 +521,7 @@ const App: React.FC = () => {
           setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
         }
       } catch (err) {
-        console.warn("YOLO26 GPU pipeline failed, falling back to local JS", err);
+        console.error('[DEBUG] YOLO26 GPU pipeline FAILED:', err);
         setError(`Server error: ${err instanceof Error ? err.message : 'Unknown'}. Switching to Local Mode.`);
         setUseBackend(false);
       } finally {
@@ -507,9 +539,10 @@ const App: React.FC = () => {
           await video.play().catch(e => console.warn("Video play interrupted", e));
           const safetyTimeout = setTimeout(() => { if (isCollectingRef.current) { finishCapture(); } }, 30000);
 
+          console.log('[DEBUG] Starting frame capture loop (local path)');
           const processFrame = async () => {
              if (!videoRef.current || !isCollectingRef.current) return;
-             if (videoRef.current.ended) { finishCapture(); return; }
+             if (videoRef.current.ended) { console.log('[DEBUG] Video ended, finishing capture'); finishCapture(); return; }
              if (videoRef.current.readyState < 2) { requestAnimationFrame(processFrame); return; }
              currentFrameTimeRef.current = videoRef.current.currentTime;
              if (captureFramesRef.current.length < 3000) {
@@ -522,13 +555,17 @@ const App: React.FC = () => {
              clearTimeout(safetyTimeout); isCollectingRef.current = false; setIsCapturing(false); setNextAutoScan(0);
              if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
              const captured = captureFramesRef.current;
+             console.log('[DEBUG] finishCapture: captured', captured.length, 'frames');
              const frames = captured.length > 50 ? captured : activeProfile?.trajectoryGenerator(300) || [];
+             console.log('[DEBUG] Using', frames.length, 'frames (captured > 50?', captured.length > 50, ')');
              setRawFrames(frames);
              
              // --- BRANCHING LOGIC FOR BACKEND ---
+             console.log('[DEBUG] Branch decision — useBackend:', useBackend);
              if (useBackend) {
                 try {
                     setStage(PipelineStage.MOVEMENT_LAB);
+                    console.log('[DEBUG] Sending', frames.length, 'frames to', `${SERVER_URL}/analyze_frames`);
                     // Send to Python Backend
                     const response = await fetch(`${SERVER_URL}/analyze_frames`, {
                         method: 'POST',
@@ -536,20 +573,41 @@ const App: React.FC = () => {
                         body: JSON.stringify({ frames: frames, config: motionConfig })
                     });
                     
+                    console.log('[DEBUG] analyze_frames response status:', response.status);
                     if (!response.ok) throw new Error("Backend Error");
-                    
+
                     const backendData = await response.json();
-                    
+                    console.log('[DEBUG] analyze_frames response:', JSON.stringify(backendData).slice(0, 500));
+
                     if (backendData.metrics) {
+                        console.log('[DEBUG] Got', backendData.metrics.length, 'metrics from analyze_frames');
                         setChartData(backendData.metrics);
                         setStage(PipelineStage.CLASSIFIER);
-                        // Backend also returns 'report' from Gemini
+
+                        // Compute aggregate rawData fields from per-frame metrics
+                        const m2 = backendData.metrics as any[];
+                        const avgEnt = m2.reduce((s: number, r: any) => s + (r.entropy || 0), 0) / m2.length;
+                        const avgFlu = m2.reduce((s: number, r: any) => s + (r.fluency_jerk || 0), 0) / m2.length;
+                        const avgFrc = m2.reduce((s: number, r: any) => s + (r.fractal_dim || 0), 0) / m2.length;
+                        const avgKE2 = m2.reduce((s: number, r: any) => s + (r.kinetic_energy || 0), 0) / m2.length;
+                        const avgRS2 = m2.reduce((s: number, r: any) => s + (r.root_stress || 0), 0) / m2.length;
+
                         const completeReport: AnalysisReport = {
                             classification: backendData.report.classification || "Normal",
                             confidence: 100,
                             seizureDetected: backendData.report.classification === 'Seizures',
                             seizureType: "None",
-                            rawData: { ...backendData.biomarkers, posture: {}, seizure: {} }, // simplified for demo
+                            rawData: {
+                              entropy: avgEnt,
+                              fluency: avgFlu,
+                              complexity: avgFrc,
+                              variabilityIndex: 0,
+                              csRiskScore: 0,
+                              avg_kinetic_energy: avgKE2,
+                              avg_root_stress: avgRS2,
+                              posture: { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal' as const, frog_leg_score: 0, spontaneous_activity: 0, sustained_posture_score: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 },
+                              seizure: { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0, calculated_type: 'None' as const }
+                            },
                             clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (YOLO26)",
                             recommendations: ["Review backend logs"],
                             timelineData: backendData.metrics
@@ -569,15 +627,20 @@ const App: React.FC = () => {
              }
 
              // --- LOCAL JS LOGIC (FALLBACK) ---
+             console.log('[DEBUG] Running LOCAL JS physics engine on', frames.length, 'frames');
              setStage(PipelineStage.MOVEMENT_LAB);
              await new Promise(resolve => setTimeout(resolve, 500));
              const physicsMetrics = physicsEngine.processSignal(frames, motionConfig);
+             console.log('[DEBUG] Physics engine returned', physicsMetrics.length, 'metrics');
              setChartData(physicsMetrics);
              await new Promise(resolve => setTimeout(resolve, 500));
              setStage(PipelineStage.CLASSIFIER);
              const computedBiomarkers = calculateBiomarkers(physicsMetrics, frames, motionConfig);
+             console.log('[DEBUG] Biomarkers:', JSON.stringify(computedBiomarkers).slice(0, 300));
              const trainingExamples = storageService.getTrainingExamples();
+             console.log('[DEBUG] Calling Gemini with', trainingExamples.length, 'training examples');
              const result = await generateGMAReport(computedBiomarkers, trainingExamples);
+             console.log('[DEBUG] Gemini result:', result.classification, 'confidence:', result.confidence);
              const completeReport: AnalysisReport = { ...result, timelineData: physicsMetrics };
              const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live Assessment ${new Date().toLocaleTimeString()}` : file?.name || "Unknown Video");
              await new Promise(resolve => setTimeout(resolve, 500));
@@ -586,7 +649,7 @@ const App: React.FC = () => {
          };
          requestAnimationFrame(processFrame);
       }
-    } catch (e) { console.error("Analysis Error:", e); setError("Analysis failed. Please try again."); setStage(PipelineStage.IDLE); setIsCapturing(false); }
+    } catch (e) { console.error("[DEBUG] TOP-LEVEL Analysis Error:", e); setError(`Analysis failed: ${e instanceof Error ? e.message : 'Unknown error'}. Check console.`); setStage(PipelineStage.IDLE); setIsCapturing(false); }
   }, [file, isLive, user, holistic, activeProfile, motionConfig, appMode, useBackend]);
 
   useEffect(() => {

@@ -53,6 +53,18 @@ except ImportError:
     def is_loaded() -> bool:
         return False
 
+# 3c. GEMINI CONTEXT CACHE
+try:
+    from gemini_cache import get_cache_name, init_cache as init_gemini_cache, add_correction
+except ImportError:
+    print("Warning: gemini_cache not found. Context caching disabled.")
+    def get_cache_name() -> str | None:
+        return None
+    def init_gemini_cache() -> str | None:
+        return None
+    def add_correction(biomarkers: dict, ai_classification: str, doctor_classification: str, doctor_notes: str | None = None) -> str | None:
+        return None
+
 # 4. INITIALIZE APP (Must be before routes!)
 app = FastAPI()
 
@@ -68,6 +80,14 @@ async def startup_event():
             print("WARNING: YOLO26 Pose model failed to load. /upload_video will be unavailable.")
     else:
         print("YOLO26 Pose not installed. Running in MediaPipe-only mode.")
+
+    # Initialize Gemini context cache (runs in thread to avoid blocking)
+    loop = asyncio.get_event_loop()
+    cache_name = await loop.run_in_executor(None, init_gemini_cache)
+    if cache_name:
+        print(f"Gemini context cache ready: {cache_name}")
+    else:
+        print("Gemini context cache not initialized (will fall back to full prompt).")
 
 # GPU semaphore: prevent concurrent inference (not thread-safe)
 _gpu_semaphore = asyncio.Semaphore(1)
@@ -105,8 +125,7 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
                         ground_truth: Optional[str] = None, metadata: Optional[Dict] = None,
                         first_frame_skeleton: Optional[Dict[str, Any]] = None):
     """
-    Logs analysis results to a JSONL file for future model training.
-
+    Logs analysis results to a JSONL file for future model training.c
     **Why we do this:** Every analysis is a potential training example. By logging:
     - biomarkers (input features)
     - gemini_response (AI prediction)
@@ -170,7 +189,6 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
     except Exception as e:
         print(f"Warning: Failed to log analysis: {e}")
 
-
 def generate_gemini_report(biomarkers: Dict[str, Any]):
     """
     Sends biomarkers to Gemini 2.5 Flash for clinical classification.
@@ -201,11 +219,8 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
     try:
         client = Client(api_key=api_key)
 
-        # IMPROVEMENT #1 & #2: Structured schema + Few-shot examples
-        # We provide example cases so Gemini learns the reasoning pattern
-        prompt = f"""You are an expert Neonatal Neurologist analyzing infant motion biomarkers for signs of neurological impairment.
-
-**BACKGROUND:**
+        # Static analysis instructions (few-shot examples + output schema)
+        analysis_instructions = """**BIOMARKER REFERENCE:**
 - Sample Entropy: Measures movement complexity (0.3-0.6 = normal, >0.7 = dysregulated/chaotic, <0.2 = overly rigid)
 - Jerk (fluency): Measures smoothness (4-7 = normal, >8 = jerky/uncoordinated, <3 = hypokinetic)
 - Typical ranges based on research: Normal infants show entropy ~0.4+-0.15, jerk ~5.5+-1.5
@@ -213,31 +228,28 @@ def generate_gemini_report(biomarkers: Dict[str, Any]):
 **FEW-SHOT EXAMPLES (learn from these):**
 
 Example 1:
-Input: {{"average_sample_entropy": 0.38, "peak_sample_entropy": 0.52, "average_jerk": 5.2}}
-Output: {{
+Input: {"average_sample_entropy": 0.38, "peak_sample_entropy": 0.52, "average_jerk": 5.2}
+Output: {
   "classification": "Normal",
   "confidence": 0.92,
   "reasoning": "All biomarkers within normal ranges. Entropy of 0.38 indicates healthy movement variability. Jerk of 5.2 suggests smooth, coordinated motion typical of neurologically intact infants."
-}}
+}
 
 Example 2:
-Input: {{"average_sample_entropy": 0.82, "peak_sample_entropy": 1.15, "average_jerk": 9.3}}
-Output: {{
+Input: {"average_sample_entropy": 0.82, "peak_sample_entropy": 1.15, "average_jerk": 9.3}
+Output: {
   "classification": "Sarnat Stage II",
   "confidence": 0.78,
   "reasoning": "Elevated entropy (0.82, >1.5 SD above normal) indicates dysregulated, chaotic movements. High jerk (9.3) suggests impaired motor control. Pattern consistent with moderate HIE. Recommend continuous monitoring and EEG correlation."
-}}
-
-**NOW ANALYZE THIS CASE:**
-Input: {json.dumps(biomarkers, indent=2)}
+}
 
 **REQUIRED OUTPUT FORMAT (strict JSON schema):**
-{{
+{
   "classification": "Normal" | "Sarnat Stage I" | "Sarnat Stage II" | "Sarnat Stage III" | "Seizures" | "Uncertain",
   "confidence": <float between 0.0 and 1.0>,
   "reasoning": "<2-3 sentence clinical explanation citing specific biomarker values>",
   "recommendations": "<optional: suggest EEG, imaging, or clinical actions if abnormal>"
-}}
+}
 
 **IMPORTANT:**
 - Use "Uncertain" if biomarkers are ambiguous or contradictory
@@ -245,10 +257,29 @@ Input: {json.dumps(biomarkers, indent=2)}
 - Always cite specific values in your reasoning (e.g., "entropy of 0.82")
 """
 
+        # Dynamic part: only the new biomarkers for this request
+        user_query = f"""{analysis_instructions}
+
+**NOW ANALYZE THIS CASE:**
+Input: {json.dumps(biomarkers, indent=2)}
+"""
+
+        # Use cached context if available, otherwise fall back to full prompt
+        cache_name = get_cache_name()
+        if cache_name:
+            config = types.GenerateContentConfig(
+                cached_content=cache_name,
+                response_mime_type='application/json',
+            )
+        else:
+            config = types.GenerateContentConfig(
+                response_mime_type='application/json',
+            )
+
         response = client.models.generate_content(
             model='gemini-3-pro-preview',
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type='application/json')
+            contents=user_query,
+            config=config,
         )
 
         # Parse response and ensure it has the required fields
@@ -481,16 +512,16 @@ async def validate_prediction(request: ValidationRequest):
                 entries.append(json.loads(line))
 
         # Find matching entry by timestamp
-        updated = False
+        matched_entry = None
         for entry in entries:
             if entry["timestamp"] == request.timestamp:
                 entry["ground_truth"] = request.ground_truth_classification
                 entry["doctor_notes"] = request.doctor_notes
                 entry["validated_at"] = datetime.now(timezone.utc).isoformat()
-                updated = True
+                matched_entry = entry
                 break
 
-        if not updated:
+        if matched_entry is None:
             raise HTTPException(status_code=404, detail=f"No analysis found with timestamp {request.timestamp}")
 
         # Write back to file (rewrite entire file with updated data)
@@ -498,9 +529,18 @@ async def validate_prediction(request: ValidationRequest):
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
 
+        # Add correction to Gemini cache so future analyses learn from it
+        ai_classification = (matched_entry.get("gemini_prediction") or {}).get("classification", "Unknown")
+        add_correction(
+            biomarkers=matched_entry.get("biomarkers", {}),
+            ai_classification=ai_classification,
+            doctor_classification=request.ground_truth_classification,
+            doctor_notes=request.doctor_notes,
+        )
+
         return {
             "status": "success",
-            "message": f"Ground truth label '{request.ground_truth_classification}' saved for analysis at {request.timestamp}"
+            "message": f"Ground truth label '{request.ground_truth_classification}' saved for analysis at {request.timestamp}. Gemini cache updated."
         }
 
     except Exception as e:

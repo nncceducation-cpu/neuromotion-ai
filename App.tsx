@@ -1,16 +1,15 @@
 
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { PipelineStage, AnalysisReport, User, SavedReport, MovementMetrics, ClinicalProfile, SkeletonFrame, ExpertCorrection, Point3D, MotionConfig, AggregatedStats } from './types';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { PipelineStage, AnalysisReport, User, SavedReport, MovementMetrics, SkeletonFrame, ExpertCorrection, Point3D, MotionConfig } from './types';
 import { PipelineVisualizer } from './components/PipelineVisualizer';
 import { EntropyChart, FluencyChart, FractalChart, PhaseSpaceChart, KineticEnergyChart } from './components/Charts';
 import { ReportView } from './components/ReportView';
 import { Dashboard } from './components/Dashboard';
 import { ComparisonView } from './components/ComparisonView';
 import { ValidationView } from './components/ValidationView';
-import { generateGMAReport, refineModelParameters } from './services/geminiService';
 import { storageService } from './services/storage';
-import { physicsEngine } from './services/physics'; 
-import { getRandomProfile, getProfileBySeed, setSeed, SERVER_URL } from './constants';
+import { GraphsView } from './components/GraphsView';
+import { getProfileBySeed, SERVER_URL, ProfileInfo } from './constants';
 
 const DEFAULT_CONFIG: MotionConfig = {
   sensitivity: 0.85,
@@ -247,7 +246,7 @@ const App: React.FC = () => {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [activeProfile, setActiveProfile] = useState<ClinicalProfile | null>(null);
+  const [activeProfile, setActiveProfile] = useState<ProfileInfo | null>(null);
   const [rawFrames, setRawFrames] = useState<SkeletonFrame[]>([]); 
   const [chartData, setChartData] = useState<MovementMetrics[]>([]);
   const [selectedReport, setSelectedReport] = useState<SavedReport | null>(null);
@@ -260,59 +259,15 @@ const App: React.FC = () => {
   const [selectedExpertDiagnosis, setSelectedExpertDiagnosis] = useState<string | null>(null);
   const [motionConfig, setMotionConfig] = useState<MotionConfig>(DEFAULT_CONFIG);
   const [prevConfig, setPrevConfig] = useState<MotionConfig | null>(null);
-  const [holistic, setHolistic] = useState<any>(null);
   const [realTimeSkeleton, setRealTimeSkeleton] = useState<SkeletonFrame | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
-  const captureFramesRef = useRef<SkeletonFrame[]>([]);
-  const isCollectingRef = useRef(false);
-  const currentFrameTimeRef = useRef(0);
   const [nextAutoScan, setNextAutoScan] = useState<number>(0);
   const [timeRemaining, setTimeRemaining] = useState<string>("");
-
-  // --- NEW: SERVER MODE STATE ---
-  const [useBackend, setUseBackend] = useState(true);
 
   useEffect(() => {
     const savedConfig = localStorage.getItem(`motionConfig_${user.id}`);
     if (savedConfig) {
         try { setMotionConfig(JSON.parse(savedConfig)); } catch (e) { console.error("Failed to load saved config"); }
-    }
-    if ((window as any).Holistic) {
-      const h = new (window as any).Holistic({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/${file}` });
-      h.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, refineFaceLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-      h.onResults(onHolisticResults);
-      setHolistic(h);
-    }
-  }, []);
-
-  const onHolisticResults = useCallback((results: any) => {
-    if (!results.poseLandmarks) return;
-    const mp = (lm: any) => ({ x: lm.x * 100, y: lm.y * 100, z: lm.z * 100, visibility: lm.visibility });
-    const frame: SkeletonFrame = {
-        timestamp: currentFrameTimeRef.current,
-        joints: {
-            nose: results.poseLandmarks[0] ? mp(results.poseLandmarks[0]) : undefined,
-            left_eye: results.poseLandmarks[2] ? mp(results.poseLandmarks[2]) : undefined,
-            right_eye: results.poseLandmarks[5] ? mp(results.poseLandmarks[5]) : undefined,
-            left_mouth: results.poseLandmarks[9] ? mp(results.poseLandmarks[9]) : undefined,
-            right_mouth: results.poseLandmarks[10] ? mp(results.poseLandmarks[10]) : undefined,
-            left_shoulder: mp(results.poseLandmarks[11]),
-            right_shoulder: mp(results.poseLandmarks[12]),
-            left_elbow: mp(results.poseLandmarks[13]),
-            right_elbow: mp(results.poseLandmarks[14]),
-            left_wrist: mp(results.poseLandmarks[15]),
-            right_wrist: mp(results.poseLandmarks[16]),
-            left_hip: mp(results.poseLandmarks[23]),
-            right_hip: mp(results.poseLandmarks[24]),
-            left_knee: mp(results.poseLandmarks[25]),
-            right_knee: mp(results.poseLandmarks[26]),
-            left_ankle: mp(results.poseLandmarks[27]),
-            right_ankle: mp(results.poseLandmarks[28])
-        }
-    };
-    setRealTimeSkeleton(frame);
-    if (captureFramesRef.current.length < 3000 && isCollectingRef.current) {
-        captureFramesRef.current.push(frame);
     }
   }, []);
 
@@ -329,8 +284,7 @@ const App: React.FC = () => {
     stopCamera(); setIsLive(false); setStage(PipelineStage.IDLE); setFile(null); setVideoPreview(null);
     setReport(null); setError(null); setActiveProfile(null); setChartData([]); setRawFrames([]);
     setIsRetraining(false); setSelectedReport(null); setRealTimeSkeleton(null);
-    captureFramesRef.current = []; setIsCapturing(false); isCollectingRef.current = false; currentFrameTimeRef.current = 0;
-    setNextAutoScan(0);
+    setIsCapturing(false); setNextAutoScan(0);
     if (appMode !== 'training') { setExpertAnnotation(""); setSelectedExpertDiagnosis(null); }
   };
 
@@ -340,8 +294,8 @@ const App: React.FC = () => {
   const startLiveAnalysis = async () => {
     setAppMode('clinical'); resetPipeline(); setIsLive(true); setView('pipeline');
     setNextAutoScan(Date.now() + 300000);
-    const seed = Date.now(); setSimulationSeed(seed); setSeed(seed); 
-    const profile = getProfileBySeed(seed); setActiveProfile(profile);
+    const seed = Date.now(); setSimulationSeed(seed);
+    const profile = await getProfileBySeed(seed); setActiveProfile(profile);
     setRawFrames([]); setChartData([]);
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1080 }, height: { ideal: 1920 } } });
@@ -353,80 +307,83 @@ const App: React.FC = () => {
   const handleCompareReports = (reports: SavedReport[]) => { setReportsToCompare(reports); resetPipeline(); setView('comparison'); };
   const handleViewReport = (savedReport: SavedReport) => { setSelectedReport(savedReport); setReport(savedReport); setView('view_report'); };
 
-  const calculateBiomarkers = (data: MovementMetrics[], frames: SkeletonFrame[], config?: MotionConfig) => {
-    if (data.length === 0) return null;
-    const meanEntropy = data.reduce((sum, d) => sum + d.entropy, 0) / data.length;
-    const peakEntropy = Math.max(...data.map(d => d.entropy));
-    const meanFractal = data.reduce((sum, d) => sum + d.fractal_dim, 0) / data.length;
-    const peakFractal = Math.max(...data.map(d => d.fractal_dim));
-    const meanJerk = data.reduce((sum, d) => sum + d.fluency_jerk, 0) / data.length;
-    const variancePos = data.reduce((sum, d) => sum + Math.pow(d.phase_x - (data.reduce((a,b)=>a+b.phase_x,0)/data.length), 2), 0) / data.length;
-    const stdPos = Math.sqrt(variancePos);
-    const varianceVel = data.reduce((sum, d) => sum + Math.pow(d.fluency_velocity - (data.reduce((a,b)=>a+b.fluency_velocity,0)/data.length), 2), 0) / data.length;
-    const stdVel = Math.sqrt(varianceVel);
-    const meanKineticEnergy = data.reduce((sum, d) => sum + d.kinetic_energy, 0) / data.length;
-    const meanRootStress = data.reduce((sum, d) => sum + d.root_stress, 0) / data.length;
-
-    let csAnalysis = { riskScore: 0 };
-    if (frames.length > 0) csAnalysis = physicsEngine.detectCrampedSynchronized(frames, 10);
-
-    let postureMetrics = { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal', frog_leg_score: 0, spontaneous_activity: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 };
-    if (frames.length > 0) postureMetrics = physicsEngine.calculatePostureMetrics(frames, data) as any;
-
-    let seizureMetrics = { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0 };
-    if (frames.length > 0) seizureMetrics = physicsEngine.detectSeizureSignatures(frames, data, config);
-    
+  // Helper: build AnalysisReport from backend response + per-frame metrics
+  const buildReportFromBackend = (backendReport: any, metrics: any[]): AnalysisReport => {
+    const avg = (key: string) => metrics.length > 0 ? metrics.reduce((s: number, r: any) => s + (Number(r[key]) || 0), 0) / metrics.length : 0;
     return {
-      average_sample_entropy: meanEntropy, peak_sample_entropy: peakEntropy, 
-      average_fractal_dimension: meanFractal, peak_fractal_dimension: peakFractal, 
-      average_jerk: meanJerk, amplitude_index_std: stdPos, velocity_variability_std: stdVel,
-      periodicity_index: 0.5, autocorrelation_risk_score: csAnalysis.riskScore,
-      posture: postureMetrics, seizure: seizureMetrics, total_frames_analyzed: data.length,
-      avg_kinetic_energy: meanKineticEnergy, avg_root_stress: meanRootStress
+      classification: backendReport.classification || "Normal",
+      confidence: backendReport.confidence ?? 50,
+      seizureDetected: backendReport.seizureDetected ?? (backendReport.classification === 'Seizures'),
+      seizureType: backendReport.seizureType || "None",
+      differentialAlert: backendReport.differentialAlert || undefined,
+      rawData: {
+        entropy: avg('entropy'),
+        fluency: avg('fluency_jerk'),
+        complexity: avg('fractal_dim'),
+        variabilityIndex: 0,
+        csRiskScore: 0,
+        avg_kinetic_energy: avg('kinetic_energy'),
+        avg_root_stress: avg('root_stress'),
+        posture: { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal' as const, frog_leg_score: 0, spontaneous_activity: 0, sustained_posture_score: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 },
+        seizure: { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0, calculated_type: 'None' as const }
+      },
+      clinicalAnalysis: backendReport.clinicalAnalysis || backendReport.reasoning || "Analysis via backend",
+      recommendations: Array.isArray(backendReport.recommendations) ? backendReport.recommendations : backendReport.recommendations ? [backendReport.recommendations] : [],
+      timelineData: metrics
     };
   };
 
   const handleSaveCorrection = async (correction: ExpertCorrection) => {
     if (!selectedReport) return;
     setIsRetraining(true);
-    storageService.saveExpertCorrection(user.id, selectedReport.id, correction);
+    await storageService.saveExpertCorrection(user.id, selectedReport.id, correction);
   };
 
   const handleTrainingSubmit = async () => {
     if (!selectedExpertDiagnosis) { alert("Please select a diagnosis."); return; }
     setTrainingStatus('analyzing');
     try {
-        const newConfig = await refineModelParameters(report, selectedExpertDiagnosis, expertAnnotation, motionConfig);
+        // Step 1: Ask backend to optimize physics config
+        const refineResponse = await fetch(`${SERVER_URL}/refine_config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_report: report ? { classification: report.classification, rawData: report.rawData } : null,
+                expert_diagnosis: selectedExpertDiagnosis,
+                annotation: expertAnnotation,
+                current_config: motionConfig
+            })
+        });
+        if (!refineResponse.ok) throw new Error("Config refinement failed");
+        const newConfig = await refineResponse.json() as MotionConfig;
         setPrevConfig(motionConfig); setMotionConfig(newConfig);
         localStorage.setItem(`motionConfig_${user.id}`, JSON.stringify(newConfig));
-        if (rawFrames.length > 0) {
-             let currentChartData = chartData;
-             if (Math.abs(newConfig.windowSize - motionConfig.windowSize) > 1 || Math.abs(newConfig.entropyThreshold - motionConfig.entropyThreshold) > 0.05 || Math.abs(newConfig.jerkThreshold - motionConfig.jerkThreshold) > 0.1) {
-                 currentChartData = physicsEngine.processSignal(rawFrames, newConfig);
-                 setChartData(currentChartData);
-             }
-             const newBiomarkers = calculateBiomarkers(currentChartData, rawFrames, newConfig);
-             const syntheticExample = {
-                inputs: { ...newBiomarkers, posture: newBiomarkers?.posture, seizure: newBiomarkers?.seizure },
-                groundTruth: { correctClassification: selectedExpertDiagnosis as any, notes: expertAnnotation, timestamp: new Date().toISOString(), clinicianName: user.name }
-             };
-             const existingExamples = storageService.getTrainingExamples();
-             const result = await generateGMAReport(newBiomarkers, [...existingExamples, syntheticExample]);
-             
-             // Construct correct SavedReport object
-             const completeReportBase = { ...result, timelineData: currentChartData };
-             const updatedReport: SavedReport = {
-                 id: selectedReport?.id || crypto.randomUUID(),
-                 date: selectedReport?.date || new Date().toISOString(),
-                 videoName: selectedReport?.videoName || (file ? file.name : "Training Session"),
-                 ...completeReportBase
-             };
 
-             setReport(updatedReport); 
-             setSelectedReport(updatedReport);
-             
-             const correction: ExpertCorrection = { correctClassification: selectedExpertDiagnosis as any, notes: expertAnnotation, timestamp: new Date().toISOString(), clinicianName: user.name };
-             storageService.saveExpertCorrection(user.id, updatedReport.id, correction);
+        // Step 2: Re-analyze with new config if we have frames
+        if (rawFrames.length > 0) {
+            const analyzeResponse = await fetch(`${SERVER_URL}/analyze_frames`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frames: rawFrames, config: newConfig })
+            });
+            if (!analyzeResponse.ok) throw new Error("Re-analysis failed");
+            const backendData = await analyzeResponse.json();
+
+            if (backendData.metrics) {
+                setChartData(backendData.metrics);
+                const completeReport = buildReportFromBackend(backendData.report, backendData.metrics);
+                const updatedReport: SavedReport = {
+                    id: selectedReport?.id || crypto.randomUUID(),
+                    date: selectedReport?.date || new Date().toISOString(),
+                    videoName: selectedReport?.videoName || (file ? file.name : "Training Session"),
+                    ...completeReport
+                };
+                setReport(updatedReport);
+                setSelectedReport(updatedReport);
+
+                const correction: ExpertCorrection = { correctClassification: selectedExpertDiagnosis as any, notes: expertAnnotation, timestamp: new Date().toISOString(), clinicianName: user.name };
+                await storageService.saveExpertCorrection(user.id, updatedReport.id, correction);
+            }
         }
         setTrainingStatus('complete');
     } catch (e) { console.error(e); setTrainingStatus('idle'); alert("Failed to train model."); }
@@ -434,223 +391,61 @@ const App: React.FC = () => {
 
   const closeTrainingModal = () => { setShowTrainingModal(false); setTrainingStatus('idle'); setExpertAnnotation(""); setSelectedExpertDiagnosis(null); setPrevConfig(null); };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const uploadedFile = e.target.files[0];
       setFile(uploadedFile); setVideoPreview(URL.createObjectURL(uploadedFile)); setIsLive(false);
-      const hash = stringToHash(uploadedFile.name); setSimulationSeed(hash); setSeed(hash); 
-      const profile = getProfileBySeed(hash); setActiveProfile(profile);
-      setRawFrames([]); setChartData([]); captureFramesRef.current = [];
-      setStage(PipelineStage.INGESTION); setReport(null); setError(null); currentFrameTimeRef.current = 0;
+      const hash = stringToHash(uploadedFile.name); setSimulationSeed(hash);
+      const profile = await getProfileBySeed(hash); setActiveProfile(profile);
+      setRawFrames([]); setChartData([]);
+      setStage(PipelineStage.INGESTION); setReport(null); setError(null);
     }
   };
 
   const runAnalysis = useCallback(async () => {
-    console.log('[DEBUG] runAnalysis called', { file: file?.name, isLive, user: !!user, holistic: !!holistic, useBackend, stage });
-    if ((!file && !isLive) || !user || !holistic) {
-      console.warn('[DEBUG] Early return — missing:', { file: !!file, isLive, user: !!user, holistic: !!holistic });
-      if (!holistic) setError("Vision model loading...");
-      return;
-    }
-
-    // --- YOLO26 GPU PIPELINE: Send raw video file to backend ---
-    if (useBackend && file && !isLive) {
-      try {
-        setStage(PipelineStage.LIFTING_3D);
-        setIsCapturing(true);
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        setStage(PipelineStage.MOVEMENT_LAB);
-        console.log('[DEBUG] Uploading video to backend:', `${SERVER_URL}/upload_video`);
-        const response = await fetch(`${SERVER_URL}/upload_video`, {
-          method: 'POST',
-          body: formData
-        });
-
-        console.log('[DEBUG] Backend response status:', response.status);
-        if (!response.ok) {
-          const errBody = await response.json().catch(() => ({ detail: 'Server error' }));
-          console.error('[DEBUG] Backend error body:', errBody);
-          throw new Error(errBody.detail || 'Backend Error');
-        }
-
-        const backendData = await response.json();
-        console.log('[DEBUG] Backend response data:', JSON.stringify(backendData).slice(0, 500));
-
-        if (backendData.metrics) {
-          console.log('[DEBUG] Got', backendData.metrics.length, 'metrics from backend');
-          setChartData(backendData.metrics);
-          setStage(PipelineStage.CLASSIFIER);
-
-          // Compute aggregate rawData fields from per-frame metrics
-          const m = backendData.metrics as any[];
-          console.log('[DEBUG] Sample metric keys:', Object.keys(m[0] || {}));
-          console.log('[DEBUG] Sample metric[0]:', JSON.stringify(m[0]));
-          const avgEntropy = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.entropy) || 0), 0) / m.length : 0;
-          const avgFluency = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.fluency_jerk) || 0), 0) / m.length : 0;
-          const avgFractal = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.fractal_dim) || 0), 0) / m.length : 0;
-          const avgKE = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.kinetic_energy) || 0), 0) / m.length : 0;
-          const avgRS = m.length > 0 ? m.reduce((s: number, r: any) => s + (Number(r.root_stress) || 0), 0) / m.length : 0;
-          console.log('[DEBUG] Computed averages:', { avgEntropy, avgFluency, avgFractal, avgKE, avgRS });
-
-          const completeReport: AnalysisReport = {
-            classification: backendData.report.classification || "Normal",
-            confidence: Math.round((backendData.report.confidence || 1) * 100),
-            seizureDetected: backendData.report.classification === 'Seizures',
-            seizureType: "None",
-            rawData: {
-              entropy: avgEntropy,
-              fluency: avgFluency,
-              complexity: avgFractal,
-              variabilityIndex: 0,
-              csRiskScore: 0,
-              avg_kinetic_energy: avgKE,
-              avg_root_stress: avgRS,
-              posture: { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal' as const, frog_leg_score: 0, spontaneous_activity: 0, sustained_posture_score: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 },
-              seizure: { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0, calculated_type: 'None' as const }
-            },
-            clinicalAnalysis: backendData.report.reasoning || "Analysis via YOLO26 GPU Pipeline",
-            recommendations: backendData.report.recommendations ? [backendData.report.recommendations] : ["Review backend logs"],
-            timelineData: backendData.metrics
-          };
-
-          const savedReport = storageService.saveReport(user.id, completeReport, file.name);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
-        }
-      } catch (err) {
-        console.error('[DEBUG] YOLO26 GPU pipeline FAILED:', err);
-        setError(`Server error: ${err instanceof Error ? err.message : 'Unknown'}. Switching to Local Mode.`);
-        setUseBackend(false);
-      } finally {
-        setIsCapturing(false);
-      }
+    if (!file || !user) {
+      if (!file) setError("Please select a video file.");
       return;
     }
 
     try {
       setStage(PipelineStage.LIFTING_3D);
-      setIsCapturing(true); captureFramesRef.current = []; isCollectingRef.current = true; currentFrameTimeRef.current = 0;
+      setIsCapturing(true);
 
-      if (videoRef.current) {
-          const video = videoRef.current;
-          await video.play().catch(e => console.warn("Video play interrupted", e));
-          const safetyTimeout = setTimeout(() => { if (isCollectingRef.current) { finishCapture(); } }, 30000);
+      const formData = new FormData();
+      formData.append('file', file);
 
-          console.log('[DEBUG] Starting frame capture loop (local path)');
-          const processFrame = async () => {
-             if (!videoRef.current || !isCollectingRef.current) return;
-             if (videoRef.current.ended) { console.log('[DEBUG] Video ended, finishing capture'); finishCapture(); return; }
-             if (videoRef.current.readyState < 2) { requestAnimationFrame(processFrame); return; }
-             currentFrameTimeRef.current = videoRef.current.currentTime;
-             if (captureFramesRef.current.length < 3000) {
-                 try { await holistic.send({ image: videoRef.current }); } catch (mpError) { console.warn("Frame Error", mpError); }
-                 if (isCollectingRef.current && captureFramesRef.current.length < 3000) { requestAnimationFrame(processFrame); } else { finishCapture(); }
-             } else { finishCapture(); }
-          };
-          
-          const finishCapture = async () => {
-             clearTimeout(safetyTimeout); isCollectingRef.current = false; setIsCapturing(false); setNextAutoScan(0);
-             if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
-             const captured = captureFramesRef.current;
-             console.log('[DEBUG] finishCapture: captured', captured.length, 'frames');
-             const frames = captured.length > 50 ? captured : activeProfile?.trajectoryGenerator(300) || [];
-             console.log('[DEBUG] Using', frames.length, 'frames (captured > 50?', captured.length > 50, ')');
-             setRawFrames(frames);
-             
-             // --- BRANCHING LOGIC FOR BACKEND ---
-             console.log('[DEBUG] Branch decision — useBackend:', useBackend);
-             if (useBackend) {
-                try {
-                    setStage(PipelineStage.MOVEMENT_LAB);
-                    console.log('[DEBUG] Sending', frames.length, 'frames to', `${SERVER_URL}/analyze_frames`);
-                    // Send to Python Backend
-                    const response = await fetch(`${SERVER_URL}/analyze_frames`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ frames: frames, config: motionConfig })
-                    });
-                    
-                    console.log('[DEBUG] analyze_frames response status:', response.status);
-                    if (!response.ok) throw new Error("Backend Error");
+      setStage(PipelineStage.MOVEMENT_LAB);
+      const response = await fetch(`${SERVER_URL}/upload_video`, {
+        method: 'POST',
+        body: formData
+      });
 
-                    const backendData = await response.json();
-                    console.log('[DEBUG] analyze_frames response:', JSON.stringify(backendData).slice(0, 500));
-
-                    if (backendData.metrics) {
-                        console.log('[DEBUG] Got', backendData.metrics.length, 'metrics from analyze_frames');
-                        setChartData(backendData.metrics);
-                        setStage(PipelineStage.CLASSIFIER);
-
-                        // Compute aggregate rawData fields from per-frame metrics
-                        const m2 = backendData.metrics as any[];
-                        const avgEnt = m2.reduce((s: number, r: any) => s + (r.entropy || 0), 0) / m2.length;
-                        const avgFlu = m2.reduce((s: number, r: any) => s + (r.fluency_jerk || 0), 0) / m2.length;
-                        const avgFrc = m2.reduce((s: number, r: any) => s + (r.fractal_dim || 0), 0) / m2.length;
-                        const avgKE2 = m2.reduce((s: number, r: any) => s + (r.kinetic_energy || 0), 0) / m2.length;
-                        const avgRS2 = m2.reduce((s: number, r: any) => s + (r.root_stress || 0), 0) / m2.length;
-
-                        const completeReport: AnalysisReport = {
-                            classification: backendData.report.classification || "Normal",
-                            confidence: 100,
-                            seizureDetected: backendData.report.classification === 'Seizures',
-                            seizureType: "None",
-                            rawData: {
-                              entropy: avgEnt,
-                              fluency: avgFlu,
-                              complexity: avgFrc,
-                              variabilityIndex: 0,
-                              csRiskScore: 0,
-                              avg_kinetic_energy: avgKE2,
-                              avg_root_stress: avgRS2,
-                              posture: { shoulder_flexion_index: 0, hip_flexion_index: 0, symmetry_score: 1, tone_label: 'Normal' as const, frog_leg_score: 0, spontaneous_activity: 0, sustained_posture_score: 0, crying_index: 0, eye_openness_index: 0, arousal_index: 0, state_transition_probability: 0 },
-                              seizure: { rhythmicity_score: 0, stiffness_score: 0, eye_deviation_score: 0, dominant_frequency: 0, limb_synchrony: 0, calculated_type: 'None' as const }
-                            },
-                            clinicalAnalysis: backendData.report.clinicalAnalysis || "Analysis via Python Backend (YOLO26)",
-                            recommendations: ["Review backend logs"],
-                            timelineData: backendData.metrics
-                        };
-                        
-                        const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live (YOLO26)` : file?.name || "Unknown");
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
-                        return;
-                    }
-                } catch (err) {
-                    console.warn("Backend failed, falling back to local JS", err);
-                    setError("Server connection failed. Switching to Local Mode.");
-                    setUseBackend(false);
-                    // Fallthrough to local logic...
-                }
-             }
-
-             // --- LOCAL JS LOGIC (FALLBACK) ---
-             console.log('[DEBUG] Running LOCAL JS physics engine on', frames.length, 'frames');
-             setStage(PipelineStage.MOVEMENT_LAB);
-             await new Promise(resolve => setTimeout(resolve, 500));
-             const physicsMetrics = physicsEngine.processSignal(frames, motionConfig);
-             console.log('[DEBUG] Physics engine returned', physicsMetrics.length, 'metrics');
-             setChartData(physicsMetrics);
-             await new Promise(resolve => setTimeout(resolve, 500));
-             setStage(PipelineStage.CLASSIFIER);
-             const computedBiomarkers = calculateBiomarkers(physicsMetrics, frames, motionConfig);
-             console.log('[DEBUG] Biomarkers:', JSON.stringify(computedBiomarkers).slice(0, 300));
-             const trainingExamples = storageService.getTrainingExamples();
-             console.log('[DEBUG] Calling Gemini with', trainingExamples.length, 'training examples');
-             const result = await generateGMAReport(computedBiomarkers, trainingExamples);
-             console.log('[DEBUG] Gemini result:', result.classification, 'confidence:', result.confidence);
-             const completeReport: AnalysisReport = { ...result, timelineData: physicsMetrics };
-             const savedReport = storageService.saveReport(user.id, completeReport, isLive ? `Live Assessment ${new Date().toLocaleTimeString()}` : file?.name || "Unknown Video");
-             await new Promise(resolve => setTimeout(resolve, 500));
-             setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport); setIsCapturing(false);
-             if (appMode === 'training') { setShowTrainingModal(true); }
-         };
-         requestAnimationFrame(processFrame);
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({ detail: 'Server error' }));
+        throw new Error(errBody.detail || 'Backend Error');
       }
-    } catch (e) { console.error("[DEBUG] TOP-LEVEL Analysis Error:", e); setError(`Analysis failed: ${e instanceof Error ? e.message : 'Unknown error'}. Check console.`); setStage(PipelineStage.IDLE); setIsCapturing(false); }
-  }, [file, isLive, user, holistic, activeProfile, motionConfig, appMode, useBackend]);
+
+      const backendData = await response.json();
+
+      if (backendData.metrics) {
+        setChartData(backendData.metrics);
+        setStage(PipelineStage.CLASSIFIER);
+
+        const completeReport = buildReportFromBackend(backendData.report, backendData.metrics);
+        const savedReport = await storageService.saveReport(user.id, completeReport, file.name);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
+        if (appMode === 'training') { setShowTrainingModal(true); }
+      }
+    } catch (err) {
+      console.error('Analysis failed:', err);
+      setError(`Server error: ${err instanceof Error ? err.message : 'Unknown'}. Ensure backend is running.`);
+      setStage(PipelineStage.IDLE);
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [file, user, appMode]);
 
   useEffect(() => {
      if (isLive && stage === PipelineStage.INGESTION && !isCapturing && nextAutoScan > 0) {
@@ -672,13 +467,6 @@ const App: React.FC = () => {
                 <span className="font-semibold text-sm tracking-tight text-neutral-900">NeuroMotion AI</span>
             </div>
             <div className="flex items-center gap-3">
-               <button
-                  onClick={() => setUseBackend(!useBackend)}
-                  className={`text-xs px-3 py-1 rounded-md font-medium border flex items-center transition-all ${useBackend ? 'bg-neutral-100 text-neutral-700 border-neutral-300' : 'bg-white text-neutral-400 border-neutral-200'}`}
-               >
-                   <i className={`fas ${useBackend ? 'fa-server' : 'fa-laptop'} mr-2`}></i>
-                   {useBackend ? 'Server Mode' : 'Local Mode'}
-               </button>
                {appMode === 'training' && ( <div className="bg-neutral-900 text-white text-xs px-3 py-1 rounded-md font-medium flex items-center"><i className="fas fa-graduation-cap mr-2"></i> Training</div> )}
                <div className="flex items-center gap-2">
                    <div className="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-500 text-xs font-semibold">{user.name.charAt(0)}</div>
@@ -689,7 +477,8 @@ const App: React.FC = () => {
          </div>
       </header>
       <main className="pt-20 pb-12 px-4 max-w-7xl mx-auto">
-         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onValidationView={() => setView('validation')} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
+         {view === 'dashboard' && ( <Dashboard user={user} onNewAnalysis={startNewAnalysis} onLiveAnalysis={startLiveAnalysis} onTrainingMode={startTrainingMode} onComparisonMode={startComparisonMode} onValidationView={() => setView('validation')} onGraphsView={() => setView('graphs')} onViewReport={handleViewReport} onCompareReports={handleCompareReports} /> )}
+         {view === 'graphs' && ( <GraphsView user={user} onClose={() => setView('dashboard')} /> )}
          {view === 'validation' && ( <ValidationView onClose={() => setView('dashboard')} /> )}
          {view === 'comparison' && ( <ComparisonView onBack={() => setView('dashboard')} initialReports={reportsToCompare} /> )}
          {view === 'view_report' && selectedReport && ( <ReportView report={selectedReport} onClose={() => setView('dashboard')} onSaveCorrection={handleSaveCorrection} /> )}
@@ -736,13 +525,12 @@ const App: React.FC = () => {
                                             <input type="file" className="hidden" accept="video/*" onChange={handleFileUpload} />
                                         </label>
                                         <p className="mt-4 text-sm opacity-50">Supported formats: MP4, MOV, WEBM</p>
-                                        {useBackend && <div className="mt-2 text-xs text-neutral-300 font-mono">Server Mode Active</div>}
                                     </div>
                                 )}
                             </div>
                             {stage === PipelineStage.INGESTION && (videoPreview || isLive) && (
                                 <button onClick={runAnalysis} className="w-full py-3 bg-neutral-900 hover:bg-neutral-800 text-white rounded-md font-medium text-sm transition-colors flex items-center justify-center gap-3">
-                                    {isCapturing ? ( <><i className="fas fa-circle-notch fa-spin"></i> Analyzing ({useBackend ? 'Server' : 'Local'})...</> ) : ( <><i className="fas fa-play"></i> Run Clinical Analysis</> )}
+                                    {isCapturing ? ( <><i className="fas fa-circle-notch fa-spin"></i> Analyzing...</> ) : ( <><i className="fas fa-play"></i> Run Clinical Analysis</> )}
                                 </button>
                             )}
                         </div>

@@ -1,148 +1,121 @@
 
 import { User, SavedReport, AnalysisReport, ExpertCorrection } from '../types';
+import { SERVER_URL } from '../constants';
 
-const STORAGE_KEYS = {
-  USERS: 'neuromotion_users',
-  CURRENT_USER: 'neuromotion_session',
-  REPORTS: 'neuromotion_reports'
+// Session token stored in memory (persisted to localStorage for page refreshes)
+let _token: string | null = localStorage.getItem('neuromotion_token');
+
+const setToken = (token: string | null) => {
+  _token = token;
+  if (token) localStorage.setItem('neuromotion_token', token);
+  else localStorage.removeItem('neuromotion_token');
 };
 
-// Mock Auth & Database Service
+const authHeaders = () => ({
+  'Content-Type': 'application/json',
+  ..._token ? { 'Authorization': `Bearer ${_token}` } : {}
+});
+
 export const storageService = {
   // --- Auth ---
-  register: (name: string, email: string, password: string): User => {
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    const existing = users.find((u: any) => u.email === email);
-    if (existing) throw new Error('Email already registered');
-
-    const newUser = {
-      id: (typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-      name,
-      email,
-      password // In a real app, hash this!
-    };
-    
-    users.push(newUser);
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-    return { id: newUser.id, name: newUser.name, email: newUser.email };
+  register: async (name: string, email: string, password: string): Promise<User> => {
+    const res = await fetch(`${SERVER_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(err.detail || 'Registration failed');
+    }
+    const data = await res.json();
+    setToken(data.token);
+    return data.user;
   },
 
-  login: (email: string, password: string): User => {
-    let users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    
-    // Auto-seed for demo purposes if empty (since registration is hidden)
-    if (users.length === 0) {
-      const defaultUser = {
-        id: 'user-demo-123',
-        name: 'Dr. Demo User',
-        email: 'demo@neuromotion.ai',
-        password: 'demo'
-      };
-      users = [defaultUser];
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  login: async (email: string, password: string): Promise<User> => {
+    const res = await fetch(`${SERVER_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Invalid credentials' }));
+      throw new Error(err.detail || 'Invalid credentials');
     }
-
-    const user = users.find((u: any) => u.email === email && u.password === password);
-    
-    if (!user) throw new Error('Invalid credentials');
-    
-    const userObj = { id: user.id, name: user.name, email: user.email };
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userObj));
-    return userObj;
+    const data = await res.json();
+    setToken(data.token);
+    localStorage.setItem('neuromotion_session', JSON.stringify(data.user));
+    return data.user;
   },
 
   logout: () => {
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    if (_token) {
+      fetch(`${SERVER_URL}/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders()
+      }).catch(() => {});
+    }
+    setToken(null);
+    localStorage.removeItem('neuromotion_session');
   },
 
   getCurrentUser: (): User | null => {
-    const stored = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    const stored = localStorage.getItem('neuromotion_session');
     return stored ? JSON.parse(stored) : null;
   },
 
   // --- Data ---
-  saveReport: (userId: string, report: AnalysisReport, videoName: string): SavedReport => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    const userReports = reportsMap[userId] || [];
-    
-    const newReport: SavedReport = {
-      ...report,
-      id: (typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-      date: new Date().toISOString(),
-      videoName
-    };
-
-    userReports.unshift(newReport); // Add to top
-    reportsMap[userId] = userReports;
-    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportsMap));
-    return newReport;
+  saveReport: async (userId: string, report: AnalysisReport, videoName: string): Promise<SavedReport> => {
+    const res = await fetch(`${SERVER_URL}/reports/${userId}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ report, videoName })
+    });
+    if (!res.ok) throw new Error('Failed to save report');
+    return await res.json();
   },
 
-  getReports: (userId: string): SavedReport[] => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    return reportsMap[userId] || [];
+  getReports: async (userId: string): Promise<SavedReport[]> => {
+    const res = await fetch(`${SERVER_URL}/reports/${userId}`, {
+      headers: authHeaders()
+    });
+    if (!res.ok) return [];
+    return await res.json();
   },
 
-  deleteReport: (userId: string, reportId: string): void => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    const userReports: SavedReport[] = reportsMap[userId] || [];
-    reportsMap[userId] = userReports.filter(r => r.id !== reportId);
-    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportsMap));
+  deleteReport: async (userId: string, reportId: string): Promise<void> => {
+    await fetch(`${SERVER_URL}/reports/${userId}/${reportId}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
   },
 
   // --- Expert Feedback Loop ---
-  saveExpertCorrection: (userId: string, reportId: string, correction: ExpertCorrection) => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    const userReports: SavedReport[] = reportsMap[userId] || [];
-    
-    const updatedReports = userReports.map(r => {
-        if (r.id === reportId) {
-            return { ...r, expertCorrection: correction };
-        }
-        return r;
+  saveExpertCorrection: async (userId: string, reportId: string, correction: ExpertCorrection) => {
+    const res = await fetch(`${SERVER_URL}/reports/${userId}/${reportId}/correction`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ correction })
     });
-
-    reportsMap[userId] = updatedReports;
-    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportsMap));
-    return updatedReports.find(r => r.id === reportId);
+    if (!res.ok) return null;
+    return await res.json();
   },
 
-  getTrainingExamples: (): { inputs: any, groundTruth: ExpertCorrection }[] => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    const allExamples: { inputs: any, groundTruth: ExpertCorrection }[] = [];
-    
-    // Gather all corrected reports across all users to build the knowledge base
-    Object.values(reportsMap).forEach((userReports: any) => {
-        userReports.forEach((r: SavedReport) => {
-            if (r.expertCorrection) {
-                allExamples.push({
-                    inputs: r.rawData,
-                    groundTruth: r.expertCorrection
-                });
-            }
-        });
+  getTrainingExamples: async (): Promise<{ inputs: any, groundTruth: ExpertCorrection }[]> => {
+    const res = await fetch(`${SERVER_URL}/training_examples`, {
+      headers: authHeaders()
     });
-
-    // Return last 10 examples to ensure robust matching
-    return allExamples.slice(0, 10); 
+    if (!res.ok) return [];
+    return await res.json();
   },
 
   // --- Analytics for Dashboard ---
-  getLearnedStats: (userId: string) => {
-    const reportsMap = JSON.parse(localStorage.getItem(STORAGE_KEYS.REPORTS) || '{}');
-    const userReports = reportsMap[userId] || [];
-    
-    const corrections = userReports.filter((r: SavedReport) => r.expertCorrection);
-    const byCategory: Record<string, number> = {};
-    
-    corrections.forEach((r: SavedReport) => {
-        const cat = r.expertCorrection!.correctClassification;
-        byCategory[cat] = (byCategory[cat] || 0) + 1;
+  getLearnedStats: async (userId: string) => {
+    const res = await fetch(`${SERVER_URL}/learned_stats/${userId}`, {
+      headers: authHeaders()
     });
-
-    return {
-        totalLearned: corrections.length,
-        breakdown: byCategory
-    };
+    if (!res.ok) return { totalLearned: 0, breakdown: {} };
+    return await res.json();
   }
 };

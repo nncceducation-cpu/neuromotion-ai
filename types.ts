@@ -118,7 +118,6 @@ export interface ClinicalProfile {
     phaseSpaceTopology: string;
     clinicalNote: string;
   };
-  trajectoryGenerator: (frames: number) => SkeletonFrame[];
 }
 
 export interface ExpertCorrection {

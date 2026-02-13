@@ -20,7 +20,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
     try {
       await new Promise(r => setTimeout(r, 800));
-      const user = storageService.login(email, password);
+      const user = await storageService.login(email, password);
       onLogin(user);
     } catch (err: any) {
       setError(err.message);

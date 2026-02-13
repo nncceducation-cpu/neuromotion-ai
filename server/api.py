@@ -1,25 +1,39 @@
 import sys
 import os
 
-# 1. SETUP PATH: Add the current directory to sys.path so we can import 'physics_engine'
-# This fixes the "ModuleNotFoundError" whether running via uvicorn or python directly.
+# 1. SETUP PATH: Add the current directory to sys.path so we can import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
 import time
+import math
 import numpy as np
-from datetime import datetime, timezone  # For timestamping logged data
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Load .env from project root (one level up from server/)
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-# 2. ROBUST IMPORT: Try importing physics_engine both ways (local vs module)
+# 2. IMPORT: Shared models
+from models import (
+    MotionConfig, AnalysisReport, SavedReport, ExpertCorrection, User,
+    LoginRequest, RegisterRequest, SaveReportRequest, CorrectionRequest,
+    TrajectoryRequest, CompareAIReportRequest, CompareChatRequest,
+    CompareStatsRequest, AutomatedReportRequest, ClinicalProfileInfo,
+)
+
+# 3. IMPORT: Storage service
+import storage as storage_service
+
+# 4. IMPORT: Trajectory generator
+import trajectory_generator
+
+# 5. IMPORT: Physics engine
 try:
     from physics_engine import process_frames
 except ImportError:
@@ -27,9 +41,9 @@ except ImportError:
         from .physics_engine import process_frames
     except ImportError:
         print("CRITICAL WARNING: 'physics_engine.py' not found. Ensure it is in the server/ directory.")
-        process_frames = lambda frames, config: [] # Fallback to prevent crash
+        process_frames = lambda frames, config: []
 
-# 3. AI SDK IMPORT
+# 6. AI SDK IMPORT
 try:
     from google.genai import Client
     import google.genai.types as types
@@ -38,14 +52,13 @@ except ImportError:
     Client = None  # type: ignore[assignment,misc]
     types = None  # type: ignore[assignment]
 
-# 3b. YOLO26 POSE IMPORT (optional — graceful fallback if not installed)
+# 6b. YOLO26 POSE IMPORT (optional)
 try:
     from yolo_inference import load_models, process_video, is_loaded
     YOLO_AVAILABLE = True
 except ImportError:
     print("Info: yolo_inference not available. YOLO26 Pose disabled, MediaPipe-only mode.")
     YOLO_AVAILABLE = False
-    # Define stub functions for type checking
     def load_models() -> bool:
         return False
     def process_video(video_path: str, target_fps: float = 10.0) -> list:
@@ -53,7 +66,7 @@ except ImportError:
     def is_loaded() -> bool:
         return False
 
-# 3c. GEMINI CONTEXT CACHE
+# 6c. GEMINI CONTEXT CACHE
 try:
     from gemini_cache import get_cache_name, init_cache as init_gemini_cache, add_correction
 except ImportError:
@@ -65,10 +78,10 @@ except ImportError:
     def add_correction(biomarkers: dict, ai_classification: str, doctor_classification: str, doctor_notes: str | None = None) -> str | None:
         return None
 
-# 4. INITIALIZE APP (Must be before routes!)
+# 7. INITIALIZE APP
 app = FastAPI()
 
-# 4b. STARTUP: Load YOLO26 Pose model once
+# STARTUP: Load YOLO26 Pose model + Gemini cache
 @app.on_event("startup")
 async def startup_event():
     if YOLO_AVAILABLE:
@@ -81,7 +94,6 @@ async def startup_event():
     else:
         print("YOLO26 Pose not installed. Running in MediaPipe-only mode.")
 
-    # Initialize Gemini context cache (runs in thread to avoid blocking)
     loop = asyncio.get_event_loop()
     cache_name = await loop.run_in_executor(None, init_gemini_cache)
     if cache_name:
@@ -89,10 +101,10 @@ async def startup_event():
     else:
         print("Gemini context cache not initialized (will fall back to full prompt).")
 
-# GPU semaphore: prevent concurrent inference (not thread-safe)
+# GPU semaphore: prevent concurrent inference
 _gpu_semaphore = asyncio.Semaphore(1)
 
-# 5. CORS MIDDLEWARE
+# 8. CORS MIDDLEWARE
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -101,14 +113,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 6. DATA MODELS
-class MotionConfig(BaseModel):
-    sensitivity: float
-    windowSize: int
-    entropyThreshold: float
-    jerkThreshold: float
-    rhythmicityWeight: float
-    stiffnessThreshold: float
+# ============================================================================
+# LEGACY REQUEST MODELS (kept for existing endpoints)
+# ============================================================================
 
 class AnalysisRequest(BaseModel):
     frames: List[Dict[str, Any]]
@@ -119,52 +126,37 @@ class AnalysisResponse(BaseModel):
     biomarkers: Dict[str, Any]
     report: Dict[str, Any]
 
-# 7. HELPER FUNCTIONS
+class RefineConfigRequest(BaseModel):
+    current_report: Optional[Dict[str, Any]] = None
+    expert_diagnosis: str
+    annotation: str = ""
+    current_config: Dict[str, float]
+
+class ValidationRequest(BaseModel):
+    timestamp: str
+    ground_truth_classification: str
+    doctor_notes: Optional[str] = None
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
 def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, Any],
                         ground_truth: Optional[str] = None, metadata: Optional[Dict] = None,
                         first_frame_skeleton: Optional[Dict[str, Any]] = None):
-    """
-    Logs analysis results to a JSONL file for future model training.c
-    **Why we do this:** Every analysis is a potential training example. By logging:
-    - biomarkers (input features)
-    - gemini_response (AI prediction)
-    - ground_truth (doctor's diagnosis, when available)
-    - first_frame_skeleton (for visual verification of pose detection)
-    We build a dataset that can be used to train a specialized fine-tuned model later.
-
-    **JSONL format:** Each line is a separate JSON object. This is better than a single
-    JSON array because it allows appending new records without reading the entire file.
-
-    **NEW: Skeleton visualization** - We now log the first frame's skeleton with all
-    17 COCO keypoints labeled. This lets doctors verify that YOLO26 detected the pose
-    correctly before trusting the analysis.
-
-    Args:
-        biomarkers: The computed motion metrics (entropy, jerk, etc.)
-        gemini_response: Gemini's classification and reasoning
-        ground_truth: Optional doctor-verified diagnosis (add this via API later)
-        metadata: Optional extra info (video_id, patient_age, etc.)
-        first_frame_skeleton: First frame's keypoints for visual verification
-    """
+    """Logs analysis results to a JSONL file for future model training."""
     log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
-    os.makedirs(log_dir, exist_ok=True)  # Create directory if it doesn't exist
-
-    # Use JSONL format: one JSON object per line
-    # This is the standard format for ML training datasets
+    os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
 
-    # Label skeleton keypoints with COCO names for clarity
     skeleton_with_labels = None
     if first_frame_skeleton and "joints" in first_frame_skeleton:
-        # COCO 17 keypoint names (standard order)
         coco_keypoint_names = [
             "nose", "left_eye", "right_eye", "left_ear", "right_ear",
             "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
             "left_wrist", "right_wrist", "left_hip", "right_hip",
             "left_knee", "right_knee", "left_ankle", "right_ankle"
         ]
-
         skeleton_with_labels = {
             "timestamp": first_frame_skeleton.get("timestamp", 0),
             "joints": first_frame_skeleton["joints"],
@@ -173,12 +165,12 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
         }
 
     log_entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),  # ISO format: 2026-02-08T15:30:00.123456+00:00
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "biomarkers": biomarkers,
         "gemini_prediction": gemini_response,
-        "ground_truth": ground_truth,  # null until doctor validates
-        "doctor_notes": None,  # Will be filled via /validate endpoint
-        "first_frame_skeleton": skeleton_with_labels,  # For visual verification
+        "ground_truth": ground_truth,
+        "doctor_notes": None,
+        "first_frame_skeleton": skeleton_with_labels,
         "metadata": metadata or {}
     }
 
@@ -189,82 +181,93 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
     except Exception as e:
         print(f"Warning: Failed to log analysis: {e}")
 
+
 def generate_gemini_report(biomarkers: Dict[str, Any]):
-    """
-    Sends biomarkers to Gemini 2.5 Flash for clinical classification.
-
-    **Improvements made:**
-    1. **Structured output schema:** We specify the exact JSON structure Gemini must return
-    2. **Few-shot learning:** We provide 2 example cases to guide Gemini's reasoning
-    3. **Confidence scoring:** We ask Gemini to include a confidence level (0.0-1.0)
-
-    **What is few-shot learning?**
-    Instead of just describing the task, we show the AI 2-3 examples of input -> output.
-    This dramatically improves accuracy because the AI learns the pattern by example.
-    Think of it like showing a student sample problems before giving them the real test.
-    """
-    api_key = os.environ.get("GEMINI_API_KEY") # Check env var
-    if not api_key:
-        # Fallback to checking the process env if set elsewhere
-        api_key = os.environ.get("API_KEY")
+    """Sends biomarkers to Gemini for clinical classification."""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
 
     if not api_key:
-        print("Error: GEMINI_API_KEY not found in environment variables.")
         return {"error": "API Key missing"}
-
     if Client is None or types is None:
-        print("Error: Google GenAI SDK not installed.")
         return {"error": "Google GenAI SDK not installed"}
 
     try:
         client = Client(api_key=api_key)
 
-        # Static analysis instructions (few-shot examples + output schema)
-        analysis_instructions = """**BIOMARKER REFERENCE:**
-- Sample Entropy: Measures movement complexity (0.3-0.6 = normal, >0.7 = dysregulated/chaotic, <0.2 = overly rigid)
-- Jerk (fluency): Measures smoothness (4-7 = normal, >8 = jerky/uncoordinated, <3 = hypokinetic)
-- Typical ranges based on research: Normal infants show entropy ~0.4+-0.15, jerk ~5.5+-1.5
+        analysis_instructions = """You are an expert Neonatal Neurologist and Computer Vision Specialist.
+Your task is to analyze the provided BIOMARKER DATA (extracted from video) and generate a structured clinical assessment.
 
-**FEW-SHOT EXAMPLES (learn from these):**
+### DIAGNOSTIC CRITERIA (MODIFIED SARNAT & ILAE):
 
-Example 1:
-Input: {"average_sample_entropy": 0.38, "peak_sample_entropy": 0.52, "average_jerk": 5.2}
-Output: {
-  "classification": "Normal",
-  "confidence": 0.92,
-  "reasoning": "All biomarkers within normal ranges. Entropy of 0.38 indicates healthy movement variability. Jerk of 5.2 suggests smooth, coordinated motion typical of neurologically intact infants."
-}
+1. **NEONATAL ENCEPHALOPATHY (Modified Sarnat Score)**:
+   - **Normal:** Alert, flexed posture, normal tone, smooth movements.
+     - Markers: Moderate-High Entropy (0.3-0.6), Low Jerk (4-7), Moderate Fractal Dimension.
+   - **Sarnat Stage I (Mild):** Hyperalert, stare, JITTERINESS, hyper-reflexia.
+     - Markers: HIGH Jerk (>8.0), HIGH Kinetic Energy, High Frequency movements.
+   - **Sarnat Stage II (Moderate):** Lethargic/obtunded, HYPOTONIC (Frog-leg/Extended).
+     - Markers: LOW Entropy (<0.3), LOW Kinetic Energy, Low Fractal Dimension (<1.2).
+   - **Sarnat Stage III (Severe):** Comatose/stuporous, FLACCID tone.
+     - Markers: NEAR-ZERO Entropy (<0.1), ZERO Kinetic Energy, Minimal movement.
 
-Example 2:
-Input: {"average_sample_entropy": 0.82, "peak_sample_entropy": 1.15, "average_jerk": 9.3}
-Output: {
-  "classification": "Sarnat Stage II",
-  "confidence": 0.78,
-  "reasoning": "Elevated entropy (0.82, >1.5 SD above normal) indicates dysregulated, chaotic movements. High jerk (9.3) suggests impaired motor control. Pattern consistent with moderate HIE. Recommend continuous monitoring and EEG correlation."
-}
+2. **SEIZURE CLASSIFICATION RULES (STRICT - ILAE 2021)**:
+   - **Clonic Seizure:** Rhythmic jerking in seizure band (1.5-5 Hz), high jerk with regularity.
+     - Markers: Very HIGH Jerk (>10), moderate-high entropy with periodic pattern.
+   - **Tonic Seizure:** Sustained body stiffness, high root stress.
+     - Markers: LOW Entropy with HIGH Root Stress, elevated kinetic energy plateau.
+   - **Myoclonic Seizure:** Shock-like, isolated high-jerk events without sustained rhythm.
+     - Markers: Extreme jerk spikes, low average but high peak entropy.
 
-**REQUIRED OUTPUT FORMAT (strict JSON schema):**
+3. **DIFFERENTIAL DIAGNOSIS (MIMICS)**:
+   - **Jitteriness vs Seizure:** Jitteriness = High Frequency (>5Hz), stimulus-sensitive, NO eye deviation.
+   - **Normal vs Sarnat I:** Both can have moderate entropy. Key differentiator: Sarnat I has jerk >8 and hyperkinetic energy.
+
+### BIOMARKER REFERENCE RANGES:
+- **Sample Entropy:** 0.3-0.6 = normal variability, >0.7 = dysregulated/chaotic, <0.2 = overly rigid/suppressed
+- **Jerk (fluency):** 4-7 = normal smooth movement, >8 = jerky/uncoordinated, <3 = hypokinetic/absent
+- **Fractal Dimension:** 1.3-1.7 = normal complexity, <1.2 = low complexity (suppressed), >1.8 = chaotic
+- **Kinetic Energy:** Relative measure of movement vigor. Near-zero = minimal/absent movement.
+- **Root Stress:** Body stability metric. High = sustained postural deviation or stiffness.
+- Normal infant baselines: entropy ~0.4+/-0.15, jerk ~5.5+/-1.5
+
+### FEW-SHOT EXAMPLES:
+
+Example 1 - Normal:
+Input: {"average_sample_entropy": 0.42, "average_jerk": 5.1, "average_fractal_dimension": 1.45, "average_kinetic_energy": 3.2, "average_root_stress": 0.8}
+Output: {"classification": "Normal", "confidence": 88, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "All biomarkers within normal ranges. Entropy of 0.42 indicates healthy movement variability. Jerk of 5.1 suggests smooth, coordinated motion. Fractal dimension 1.45 shows normal movement complexity.", "recommendations": ["Continue routine monitoring"]}
+
+Example 2 - Sarnat Stage II:
+Input: {"average_sample_entropy": 0.18, "average_jerk": 2.1, "average_fractal_dimension": 1.1, "average_kinetic_energy": 0.5, "average_root_stress": 0.3}
+Output: {"classification": "Sarnat Stage II", "confidence": 82, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "Low entropy (0.18) indicates suppressed, overly rigid movement pattern. Hypokinetic jerk (2.1) and low kinetic energy (0.5) suggest lethargy/obtundation consistent with moderate HIE.", "recommendations": ["Recommend continuous EEG monitoring", "Consider MRI within 24-72 hours", "Assess for therapeutic hypothermia eligibility"]}
+
+Example 3 - Seizures (Clonic):
+Input: {"average_sample_entropy": 0.75, "average_jerk": 12.3, "average_fractal_dimension": 1.6, "average_kinetic_energy": 8.1, "average_root_stress": 2.5}
+Output: {"classification": "Seizures", "confidence": 76, "seizureDetected": true, "seizureType": "Clonic", "differentialAlert": null, "clinicalAnalysis": "Very high jerk (12.3) with elevated entropy (0.75) and high kinetic energy (8.1) indicate rhythmic jerking consistent with clonic seizure activity. High root stress (2.5) suggests sustained postural involvement.", "recommendations": ["Urgent EEG correlation required", "Consider IV phenobarbital", "Continuous video-EEG monitoring"]}
+
+**REQUIRED OUTPUT FORMAT (strict JSON):**
 {
-  "classification": "Normal" | "Sarnat Stage I" | "Sarnat Stage II" | "Sarnat Stage III" | "Seizures" | "Uncertain",
-  "confidence": <float between 0.0 and 1.0>,
-  "reasoning": "<2-3 sentence clinical explanation citing specific biomarker values>",
-  "recommendations": "<optional: suggest EEG, imaging, or clinical actions if abnormal>"
+  "classification": "Normal" | "Sarnat Stage I" | "Sarnat Stage II" | "Sarnat Stage III" | "Seizures",
+  "confidence": <integer 0-100>,
+  "seizureDetected": <boolean>,
+  "seizureType": "None" | "Clonic" | "Tonic" | "Myoclonic",
+  "differentialAlert": "<string warning if mimic pattern detected, or null>",
+  "clinicalAnalysis": "<detailed 2-4 sentence clinical explanation citing specific biomarker values>",
+  "recommendations": ["<array>", "<of>", "<action items>"]
 }
 
 **IMPORTANT:**
-- Use "Uncertain" if biomarkers are ambiguous or contradictory
-- Confidence should reflect how clear-cut the pattern is
-- Always cite specific values in your reasoning (e.g., "entropy of 0.82")
+- Confidence is 0-100 (integer), reflecting how clear-cut the pattern is
+- Always cite specific biomarker values in clinicalAnalysis
+- Use differentialAlert to flag mimics
+- seizureDetected must be true only when classification is "Seizures"
+- recommendations must be an array of strings
 """
 
-        # Dynamic part: only the new biomarkers for this request
         user_query = f"""{analysis_instructions}
 
 **NOW ANALYZE THIS CASE:**
 Input: {json.dumps(biomarkers, indent=2)}
 """
 
-        # Use cached context if available, otherwise fall back to full prompt
         cache_name = get_cache_name()
         if cache_name:
             config = types.GenerateContentConfig(
@@ -282,50 +285,67 @@ Input: {json.dumps(biomarkers, indent=2)}
             config=config,
         )
 
-        # Parse response and ensure it has the required fields
         if response.text is None:
-            return {"classification": "Error", "confidence": 0.0, "reasoning": "Gemini returned empty response"}
+            return _gemini_error_response("Gemini returned empty response")
         result = json.loads(response.text)
 
-        # Validate schema (basic sanity check)
-        required_fields = ["classification", "confidence", "reasoning"]
-        for field in required_fields:
-            if field not in result:
-                print(f"Warning: Gemini response missing '{field}' field")
-                result[field] = "Unknown" if field == "classification" else 0.0 if field == "confidence" else "No reasoning provided"
+        result.setdefault("classification", "Normal")
+        result.setdefault("confidence", 50)
+        result.setdefault("seizureDetected", result.get("classification") == "Seizures")
+        result.setdefault("seizureType", "None")
+        result.setdefault("differentialAlert", None)
+        result.setdefault("clinicalAnalysis", result.pop("reasoning", "No analysis provided"))
+        if isinstance(result.get("recommendations"), str):
+            result["recommendations"] = [result["recommendations"]]
+        result.setdefault("recommendations", [])
+        if isinstance(result["confidence"], float) and result["confidence"] <= 1.0:
+            result["confidence"] = round(result["confidence"] * 100)
 
         return result
 
     except Exception as e:
         print(f"Gemini Error: {e}")
-        return {
-            "classification": "Error",
-            "confidence": 0.0,
-            "reasoning": f"AI service error: {str(e)}",
-            "recommendations": "Manual review required"
-        }
+        return _gemini_error_response(f"AI service error: {str(e)}")
 
-# 8. API ROUTES
+
+def _gemini_error_response(reason: str) -> Dict[str, Any]:
+    return {
+        "classification": "Normal",
+        "confidence": 0,
+        "seizureDetected": False,
+        "seizureType": "None",
+        "differentialAlert": None,
+        "clinicalAnalysis": reason,
+        "recommendations": ["Manual review required"]
+    }
+
+
+def _get_gemini_client():
+    """Get a Gemini client instance for comparison AI endpoints."""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
+    if not api_key or Client is None:
+        return None
+    return Client(api_key=api_key)
+
+
+# ============================================================================
+# EXISTING API ROUTES
+# ============================================================================
+
 @app.post("/analyze_frames")
 async def analyze_frames_endpoint(request: AnalysisRequest):
-    """
-    Endpoint for frontend to send MediaPipe/YOLO26 keypoints for Physics Processing + Gemini
-    """
+    """Endpoint for frontend to send keypoints for Physics Processing + Gemini."""
     print(f"Received {len(request.frames)} frames for analysis")
 
-    # Run Physics Engine
     metrics = process_frames(request.frames, request.config.model_dump())
 
-    # Handle empty metrics gracefully
     if not metrics:
-        print("Physics engine returned no metrics.")
         return {
             "metrics": [],
             "biomarkers": {"error": "Insufficient motion data extracted"},
             "report": {}
         }
 
-    # Extract aggregates safely
     ents = [m.get('entropy', 0) for m in metrics]
     jerks = [m.get('fluency_jerk', 0) for m in metrics]
     fractals = [m.get('fractal_dim', 0) for m in metrics]
@@ -346,10 +366,8 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
         "backend_source": "Python/YOLO26-Pipeline"
     }
 
-    # Call Gemini (few-shot + structured output)
     report = generate_gemini_report(biomarkers)
 
-    # Log everything for future model training
     log_analysis_result(
         biomarkers=biomarkers,
         gemini_response=report,
@@ -358,18 +376,12 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
         first_frame_skeleton=request.frames[0] if request.frames else None
     )
 
-    return {
-        "metrics": metrics,
-        "biomarkers": biomarkers,
-        "report": report
-    }
+    return {"metrics": metrics, "biomarkers": biomarkers, "report": report}
+
 
 @app.post("/upload_video")
 async def upload_video_for_pose(file: UploadFile = File(...)):
-    """
-    Upload a video for server-side YOLO26 Pose processing.
-    Runs: detection + pose estimation -> physics engine -> Gemini report.
-    """
+    """Upload a video for server-side YOLO26 Pose processing."""
     if not YOLO_AVAILABLE or not is_loaded():
         raise HTTPException(status_code=503, detail="YOLO26 Pose model not available")
 
@@ -385,7 +397,6 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
             buffer.write(contents)
         print(f"Processing video: {temp_filename} ({len(contents)} bytes)")
 
-        # Run YOLO26 pipeline (GPU-exclusive via semaphore)
         async with _gpu_semaphore:
             loop = asyncio.get_event_loop()
             skeleton_frames = await loop.run_in_executor(
@@ -398,7 +409,6 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
                 "report": {"error": "Too few valid frames"}, "frames_processed": len(skeleton_frames)
             }
 
-        # Reuse existing physics engine
         metrics = process_frames(skeleton_frames, config.model_dump())
         if not metrics:
             return {
@@ -425,7 +435,6 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
 
         report = generate_gemini_report(biomarkers)
 
-        # Log this analysis for future training
         log_analysis_result(
             biomarkers=biomarkers,
             gemini_response=report,
@@ -451,6 +460,7 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
+
 @app.get("/health")
 def health_check():
     try:
@@ -468,36 +478,77 @@ def health_check():
         "yolo_loaded": YOLO_AVAILABLE and is_loaded() if YOLO_AVAILABLE else False,
     }
 
+
 @app.get("/")
 def root():
     return {"message": "Neuromotion AI Backend is Running"}
 
-# Doctor Validation Endpoint for Ground Truth Labels
-class ValidationRequest(BaseModel):
-    """
-    Data model for doctor validation of AI predictions.
 
-    This allows clinicians to correct AI mistakes, which builds a labeled
-    dataset for training a fine-tuned model in the future.
-    """
-    timestamp: str  # ISO timestamp of the original analysis (from log file)
-    ground_truth_classification: str  # Doctor's actual diagnosis
-    doctor_notes: Optional[str] = None  # Optional clinical context
+@app.post("/refine_config")
+async def refine_config(request: RefineConfigRequest):
+    """AI-powered physics engine parameter tuning."""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    if Client is None or types is None:
+        raise HTTPException(status_code=500, detail="Google GenAI SDK not installed")
+
+    prompt = f"""You are a Senior Computer Vision Engineer optimizing a physics-based motor assessment algorithm for neonates.
+
+### GOAL
+The current algorithm misclassified a video. You must adjust the signal processing parameters (MotionConfig) so that the physics engine extracts biomarkers that lead to the CORRECT diagnosis ("{request.expert_diagnosis}").
+
+### CONTEXT
+- **Current Diagnosis**: {request.current_report.get('classification', 'Unknown') if request.current_report else 'Unknown'}
+- **Expert Diagnosis**: "{request.expert_diagnosis}"
+- **Expert Annotation**: "{request.annotation}"
+
+### PHYSICS ENGINE LOGIC & PARAMETERS
+1. **sensitivity** (0.1-1.0): Controls peak detection threshold.
+2. **windowSize** (10-60 frames): Smoothing window for Entropy/Fractals.
+3. **entropyThreshold** (0.05-0.5): The 'r' radius for Sample Entropy matching.
+4. **rhythmicityWeight** (0.0-2.0): Multiplier for Seizure Rhythmicity Score.
+5. **jerkThreshold** (1.0-10.0): Baseline offset for Smoothness/Fluency.
+6. **stiffnessThreshold** (0.1-2.0): Variance divider for stiffness.
+
+### CURRENT CONFIGURATION
+{json.dumps(request.current_config, indent=2)}
+
+### BIOMARKER SNAPSHOT
+{json.dumps(request.current_report.get('rawData', {{}}) if request.current_report else 'N/A', indent=2)}
+
+### OPTIMIZATION STRATEGY
+- **Missed Seizure?** Boost 'sensitivity' & 'rhythmicityWeight'.
+- **False Seizure (Jitteriness)?** Reduce 'rhythmicityWeight', Reduce 'windowSize', Increase 'jerkThreshold'.
+- **Missed Lethargy (Sarnat II)?** Increase 'windowSize', Increase 'entropyThreshold'.
+- **False Lethargy?** Decrease 'entropyThreshold', Decrease 'windowSize'.
+
+OUTPUT JSON ONLY (The new MotionConfig object).
+"""
+
+    try:
+        client = Client(api_key=api_key)
+        config = types.GenerateContentConfig(response_mime_type='application/json')
+        response = client.models.generate_content(
+            model='gemini-3-pro-preview', contents=prompt, config=config,
+        )
+        if not response.text:
+            raise HTTPException(status_code=500, detail="Empty response from AI")
+        new_config = json.loads(response.text)
+        return new_config
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="AI returned invalid JSON")
+    except Exception as e:
+        print(f"Refine config error: {e}")
+        fallback = dict(request.current_config)
+        fallback["sensitivity"] = min(1.0, fallback.get("sensitivity", 0.85) * 1.05)
+        fallback["rhythmicityWeight"] = fallback.get("rhythmicityWeight", 0.7) * 0.95
+        return fallback
+
 
 @app.post("/validate")
 async def validate_prediction(request: ValidationRequest):
-    """
-    Endpoint for doctors to submit ground truth labels for AI predictions.
-
-    **Use case:**
-    After a patient is diagnosed, a neurologist can use this endpoint to
-    label the AI's prediction as correct/incorrect and provide the true diagnosis.
-
-    **How it works:**
-    1. Find the log entry with matching timestamp
-    2. Update the ground_truth field with doctor's diagnosis
-    3. This labeled data can later be used to train a specialized model
-    """
+    """Endpoint for doctors to submit ground truth labels for AI predictions."""
     log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
     log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
 
@@ -505,13 +556,11 @@ async def validate_prediction(request: ValidationRequest):
         raise HTTPException(status_code=404, detail="No analysis logs found")
 
     try:
-        # Read all log entries
         entries = []
         with open(log_file, "r", encoding="utf-8") as f:
             for line in f:
                 entries.append(json.loads(line))
 
-        # Find matching entry by timestamp
         matched_entry = None
         for entry in entries:
             if entry["timestamp"] == request.timestamp:
@@ -524,12 +573,10 @@ async def validate_prediction(request: ValidationRequest):
         if matched_entry is None:
             raise HTTPException(status_code=404, detail=f"No analysis found with timestamp {request.timestamp}")
 
-        # Write back to file (rewrite entire file with updated data)
         with open(log_file, "w", encoding="utf-8") as f:
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
 
-        # Add correction to Gemini cache so future analyses learn from it
         ai_classification = (matched_entry.get("gemini_prediction") or {}).get("classification", "Unknown")
         add_correction(
             biomarkers=matched_entry.get("biomarkers", {}),
@@ -540,27 +587,16 @@ async def validate_prediction(request: ValidationRequest):
 
         return {
             "status": "success",
-            "message": f"Ground truth label '{request.ground_truth_classification}' saved for analysis at {request.timestamp}. Gemini cache updated."
+            "message": f"Ground truth label '{request.ground_truth_classification}' saved. Gemini cache updated."
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
+
 @app.get("/pending_validations")
 async def get_pending_validations(limit: int = 50, include_validated: bool = False):
-    """
-    Fetch analysis cases that need doctor validation.
-
-    **Query params:**
-    - limit: Max number of cases to return (default 50)
-    - include_validated: If True, return all cases; if False, only unvalidated (default False)
-
-    **Returns:**
-    List of analyses sorted by timestamp (newest first), each containing:
-    - timestamp, biomarkers, gemini_prediction, first_frame_skeleton, metadata
-    - ground_truth (if validated)
-    - doctor_notes (if validated)
-    """
+    """Fetch analysis cases that need doctor validation."""
     log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
     log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
 
@@ -568,20 +604,15 @@ async def get_pending_validations(limit: int = 50, include_validated: bool = Fal
         return {"cases": [], "total": 0}
 
     try:
-        # Read all log entries
         entries = []
         with open(log_file, "r", encoding="utf-8") as f:
             for line in f:
                 entries.append(json.loads(line))
 
-        # Filter based on validation status
         if not include_validated:
             entries = [e for e in entries if not e.get("ground_truth")]
 
-        # Sort by timestamp (newest first)
         entries.sort(key=lambda x: x["timestamp"], reverse=True)
-
-        # Limit results
         entries = entries[:limit]
 
         return {
@@ -592,3 +623,344 @@ async def get_pending_validations(limit: int = 50, include_validated: bool = Fal
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch validations: {str(e)}")
+
+
+# ============================================================================
+# NEW: AUTH ENDPOINTS (converted from services/storage.ts)
+# ============================================================================
+
+@app.post("/auth/login")
+async def auth_login(request: LoginRequest):
+    """Login with email + password. Returns user object + session token."""
+    try:
+        user, token = storage_service.login(request.email, request.password)
+        return {"user": user.model_dump(), "token": token}
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/auth/register")
+async def auth_register(request: RegisterRequest):
+    """Register a new user."""
+    try:
+        user = storage_service.register(request.name, request.email, request.password)
+        # Auto-login after registration
+        _, token = storage_service.login(request.email, request.password)
+        return {"user": user.model_dump(), "token": token}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/auth/me")
+async def auth_me(authorization: Optional[str] = Header(None)):
+    """Get current user from session token."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="No authorization header")
+    token = authorization.replace("Bearer ", "")
+    user = storage_service.get_current_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return user.model_dump()
+
+
+@app.post("/auth/logout")
+async def auth_logout(authorization: Optional[str] = Header(None)):
+    """Invalidate session token."""
+    if authorization:
+        token = authorization.replace("Bearer ", "")
+        storage_service.logout(token)
+    return {"status": "success"}
+
+
+# ============================================================================
+# NEW: REPORT CRUD ENDPOINTS (converted from services/storage.ts)
+# ============================================================================
+
+@app.get("/reports/{user_id}")
+async def get_reports(user_id: str):
+    """Get all saved reports for a user."""
+    return storage_service.get_reports(user_id)
+
+
+@app.post("/reports/{user_id}")
+async def save_report(user_id: str, request: SaveReportRequest):
+    """Save a new analysis report."""
+    report_dict = request.report.model_dump()
+    saved = storage_service.save_report(user_id, report_dict, request.videoName)
+    return saved
+
+
+@app.delete("/reports/{user_id}/{report_id}")
+async def delete_report(user_id: str, report_id: str):
+    """Delete a specific report."""
+    storage_service.delete_report(user_id, report_id)
+    return {"status": "success"}
+
+
+@app.post("/reports/{user_id}/{report_id}/correction")
+async def save_correction(user_id: str, report_id: str, request: CorrectionRequest):
+    """Save an expert correction to a report."""
+    updated = storage_service.save_expert_correction(
+        user_id, report_id, request.correction.model_dump()
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return updated
+
+
+@app.get("/training_examples")
+async def get_training_examples():
+    """Get all expert-corrected reports (last 10) for training."""
+    return storage_service.get_training_examples()
+
+
+@app.get("/learned_stats/{user_id}")
+async def get_learned_stats(user_id: str):
+    """Get aggregated correction stats for dashboard."""
+    return storage_service.get_learned_stats(user_id)
+
+
+# ============================================================================
+# NEW: TRAJECTORY ENDPOINTS (converted from constants.ts)
+# ============================================================================
+
+@app.post("/generate_trajectory")
+async def generate_trajectory_endpoint(request: TrajectoryRequest):
+    """Generate skeleton frames for a clinical profile."""
+    try:
+        frames = trajectory_generator.generate_trajectory(
+            profile_id=request.profile_id,
+            frames=request.frames,
+            seed=request.seed,
+        )
+        return {"frames": frames, "profile_id": request.profile_id, "count": len(frames)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/clinical_profiles")
+async def get_clinical_profiles():
+    """Get list of clinical profile metadata (without generator functions)."""
+    return [
+        {
+            "id": p["id"],
+            "label": p["label"],
+            "features": p["features"],
+        }
+        for p in trajectory_generator.CLINICAL_PROFILES
+    ]
+
+
+@app.get("/profile_by_seed/{seed}")
+async def get_profile_by_seed(seed: int):
+    """Get a clinical profile deterministically from a seed value."""
+    profile = trajectory_generator.get_profile_by_seed(seed)
+    return {
+        "id": profile["id"],
+        "label": profile["label"],
+        "features": profile["features"],
+    }
+
+
+# ============================================================================
+# NEW: COMPARISON AI ENDPOINTS (converted from ComparisonView.tsx Gemini calls)
+# ============================================================================
+
+@app.post("/compare/ai_report")
+async def compare_ai_report(request: CompareAIReportRequest):
+    """Generate an AI biomechanics analysis report from dataset summaries."""
+    client = _get_gemini_client()
+    if not client or types is None:
+        raise HTTPException(status_code=500, detail="Gemini AI not configured")
+
+    prompt = f"""
+      You are an expert Biomechanics Data Scientist.
+      Analyze the difference between the following motion sessions based on these computed metrics:
+
+      {request.dataset_summaries}
+
+      Provide a concise 3-paragraph summary:
+      1. Performance Comparison (Intensity, Kinetic Energy & Output)
+      2. Stability & Control Analysis (Root Stress & Entropy/Complexity)
+      3. Kinematic Variability & Smoothness.
+
+      STRICT REQUIREMENT: Focus ONLY on the physics, movement patterns, and data trends.
+      DO NOT provide any medical diagnoses, clinical interpretations (e.g. Sarnat stages, CP), or medical advice.
+
+      Use professional technical language.
+    """
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return {"report": response.text or "No analysis generated."}
+    except Exception as e:
+        print(f"Compare AI Report Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate AI analysis")
+
+
+@app.post("/compare/chat")
+async def compare_chat(request: CompareChatRequest):
+    """Chat about comparison data using Gemini AI."""
+    client = _get_gemini_client()
+    if not client or types is None:
+        raise HTTPException(status_code=500, detail="Gemini AI not configured")
+
+    prompt = f"""
+      Context: The user is looking at a dashboard comparing motion capture sessions.
+      Data Summary:
+      {request.dataset_summaries}
+
+      User Question: "{request.question}"
+
+      Answer the user specifically using the data provided. Keep it helpful, encouraging, and brief (under 50 words if possible).
+    """
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction="You are a helpful AI Sports Science and Biomechanics Assistant."
+            ),
+        )
+        return {"response": response.text or "I couldn't generate a response."}
+    except Exception as e:
+        print(f"Compare Chat Error: {e}")
+        return {"response": "Error connecting to AI service."}
+
+
+@app.post("/compare/stats")
+async def compare_stats(request: CompareStatsRequest):
+    """Calculate statistics for a dataset of movement metrics."""
+    metric_keys = ['entropy', 'fluency_velocity', 'fluency_jerk', 'fractal_dim', 'kinetic_energy', 'root_stress']
+    stats: Dict[str, Any] = {}
+
+    for key in metric_keys:
+        values = [float(d.get(key, 0)) for d in request.data]
+        n = len(values)
+        if n == 0:
+            stats[key] = {"mean": 0, "min": 0, "max": 0, "std": 0}
+            continue
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / n
+        std = math.sqrt(variance)
+        stats[key] = {
+            "mean": mean,
+            "min": min(values),
+            "max": max(values),
+            "std": std,
+        }
+
+    return stats
+
+
+@app.post("/compare/automated_report")
+async def compare_automated_report(request: AutomatedReportRequest):
+    """Generate an automated comparison report from dataset statistics."""
+    datasets = request.datasets
+    if not datasets:
+        return {"report": ""}
+
+    lines: List[str] = []
+    date = datetime.now().strftime("%m/%d/%Y")
+
+    lines.append("NEUROMOTION AI - COMPARATIVE CLINICAL REPORT")
+    lines.append(f"Date: {date}")
+    lines.append(f"Subjects: {', '.join(d.get('label', 'Unknown') for d in datasets)}")
+    lines.append("")
+    lines.append("----------------------------------------------------------------")
+    lines.append("1. EXECUTIVE SUMMARY & DETAILED ANALYSIS")
+    lines.append("----------------------------------------------------------------")
+
+    # Find leaders
+    max_entropy = datasets[0]
+    min_entropy = datasets[0]
+    max_jerk = datasets[0]
+
+    for d in datasets:
+        s = d.get("stats", {})
+        if s.get("entropy", {}).get("mean", 0) > max_entropy.get("stats", {}).get("entropy", {}).get("mean", 0):
+            max_entropy = d
+        if s.get("entropy", {}).get("mean", 0) < min_entropy.get("stats", {}).get("entropy", {}).get("mean", 0):
+            min_entropy = d
+        if s.get("fluency_jerk", {}).get("mean", 0) > max_jerk.get("stats", {}).get("fluency_jerk", {}).get("mean", 0):
+            max_jerk = d
+
+    me_val = max_entropy.get("stats", {}).get("entropy", {}).get("mean", 0)
+    lines.append(f"* COMPLEXITY LEADER: {max_entropy.get('label', 'Unknown')}")
+    lines.append(f"  - Highest variability (Mean Entropy: {me_val:.3f}).")
+    lines.append("  - Clinical significance: Indicates a richer motor repertoire and healthy corticospinal integrity.")
+    lines.append("")
+
+    mie_val = min_entropy.get("stats", {}).get("entropy", {}).get("mean", 0)
+    if min_entropy.get("label") != max_entropy.get("label"):
+        lines.append(f"* CONCERN FOR POVERTY OF MOVEMENT: {min_entropy.get('label', 'Unknown')}")
+        lines.append(f"  - Lowest variability (Mean Entropy: {mie_val:.3f}).")
+        lines.append("  - Clinical significance: May indicate lethargy, hypotonia, or encephalopathy (Sarnat II/III).")
+        lines.append("")
+
+    mj_val = max_jerk.get("stats", {}).get("fluency_jerk", {}).get("mean", 0)
+    lines.append(f"* HIGHEST ACTIVITY INTENSITY: {max_jerk.get('label', 'Unknown')}")
+    lines.append(f"  - Peak Jerk Index: {mj_val:.2f}")
+    lines.append("  - Clinical significance: If excessive (>8.0), consider jitteriness, hyperexcitability, or tremors.")
+    lines.append("")
+
+    lines.append("----------------------------------------------------------------")
+    lines.append("2. DETAILED BIOMARKER PROFILES")
+    lines.append("----------------------------------------------------------------")
+
+    for d in datasets:
+        s = d.get("stats", {})
+        e = s.get("entropy", {}).get("mean", 0)
+        v = s.get("fluency_velocity", {}).get("mean", 0)
+        j = s.get("fluency_jerk", {}).get("mean", 0)
+        f = s.get("fractal_dim", {}).get("mean", 0)
+        ke = s.get("kinetic_energy", {}).get("mean", 0)
+
+        lines.append(f"SUBJECT: {d.get('label', 'Unknown')}")
+        lines.append(f"  * Entropy (Complexity):   {e:.3f} [Norm: >0.6]")
+        lines.append(f"  * Velocity (Activity):    {v:.3f}")
+        lines.append(f"  * Jerk (Smoothness):      {j:.3f} [Norm: <7.0]")
+        lines.append(f"  * Fractal Dim (Texture):  {f:.3f}")
+        lines.append(f"  * Kinetic Energy (PhysX): {ke:.2f} J")
+
+        impression = []
+        if e < 0.4:
+            impression.append("Markedly reduced complexity (Warning)")
+        elif e < 0.6:
+            impression.append("Mildly reduced complexity")
+        else:
+            impression.append("Normal complexity")
+
+        if j > 8.0:
+            impression.append("High frequency tremors detected")
+
+        lines.append(f"  => INTERPRETATION: {', '.join(impression)}")
+        lines.append("")
+
+    if len(datasets) == 2:
+        lines.append("----------------------------------------------------------------")
+        lines.append(f"3. DIRECT COMPARISON ({datasets[0].get('label')} vs {datasets[1].get('label')})")
+        lines.append("----------------------------------------------------------------")
+        d1s = datasets[0].get("stats", {})
+        d2s = datasets[1].get("stats", {})
+
+        e_diff = d1s.get("entropy", {}).get("mean", 0) - d2s.get("entropy", {}).get("mean", 0)
+        v_diff = d1s.get("fluency_velocity", {}).get("mean", 0) - d2s.get("fluency_velocity", {}).get("mean", 0)
+        j_diff = d1s.get("fluency_jerk", {}).get("mean", 0) - d2s.get("fluency_jerk", {}).get("mean", 0)
+
+        d2e = d2s.get("entropy", {}).get("mean", 1) or 1
+        d2v = d2s.get("fluency_velocity", {}).get("mean", 1) or 1
+        d2j = d2s.get("fluency_jerk", {}).get("mean", 1) or 1
+
+        lines.append(f"* ENTROPY: {datasets[0].get('label')} is {abs(e_diff / d2e * 100):.1f}% {'more' if e_diff > 0 else 'less'} complex.")
+        lines.append(f"* VELOCITY: {datasets[0].get('label')} is {abs(v_diff / d2v * 100):.1f}% {'faster' if v_diff > 0 else 'slower'}.")
+        lines.append(f"* JERK: {datasets[0].get('label')} is {abs(j_diff / d2j * 100):.1f}% {'jitterier' if j_diff > 0 else 'smoother'}.")
+
+    lines.append("")
+    lines.append("Report generated automatically by NeuroMotion AI.")
+
+    return {"report": "\n".join(lines)}

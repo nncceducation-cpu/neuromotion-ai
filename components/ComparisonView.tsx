@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, Legend, BarChart, Bar } from 'recharts';
-import { GoogleGenAI } from "@google/genai";
 import { MovementMetrics, ComparisonDataset, SavedReport } from '../types';
+import { SERVER_URL } from '../constants';
 
 interface ComparisonViewProps {
   onBack: () => void;
@@ -62,101 +62,27 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
       return stats;
   };
 
-  const generateAutomatedReport = (currentDatasets: ComparisonDataset[]) => {
+  const generateAutomatedReport = async (currentDatasets: ComparisonDataset[]) => {
       if (currentDatasets.length === 0) return;
 
-      const lines: string[] = [];
-      const date = new Date().toLocaleDateString();
-
-      lines.push(`NEUROMOTION AI - COMPARATIVE CLINICAL REPORT`);
-      lines.push(`Date: ${date}`);
-      lines.push(`Subjects: ${currentDatasets.map(d => d.label).join(', ')}`);
-      lines.push(``);
-      lines.push(`----------------------------------------------------------------`);
-      lines.push(`1. EXECUTIVE SUMMARY & DETAILED ANALYSIS`);
-      lines.push(`----------------------------------------------------------------`);
-
-      let maxEntropy = currentDatasets[0];
-      let minEntropy = currentDatasets[0];
-      let maxJerk = currentDatasets[0];
-      let maxVel = currentDatasets[0];
-
-      currentDatasets.forEach(d => {
-          if ((d.stats?.entropy.mean || 0) > (maxEntropy.stats?.entropy.mean || 0)) maxEntropy = d;
-          if ((d.stats?.entropy.mean || 0) < (minEntropy.stats?.entropy.mean || 0)) minEntropy = d;
-          if ((d.stats?.fluency_jerk.mean || 0) > (maxJerk.stats?.fluency_jerk.mean || 0)) maxJerk = d;
-          if ((d.stats?.fluency_velocity.mean || 0) > (maxVel.stats?.fluency_velocity.mean || 0)) maxVel = d;
-      });
-
-      lines.push(`• COMPLEXITY LEADER: ${maxEntropy.label}`);
-      lines.push(`  - Highest variability (Mean Entropy: ${(maxEntropy.stats?.entropy.mean || 0).toFixed(3)}).`);
-      lines.push(`  - Clinical significance: Indicates a richer motor repertoire and healthy corticospinal integrity.`);
-      lines.push(``);
-
-      if (minEntropy.label !== maxEntropy.label) {
-          lines.push(`• CONCERN FOR POVERTY OF MOVEMENT: ${minEntropy.label}`);
-          lines.push(`  - Lowest variability (Mean Entropy: ${(minEntropy.stats?.entropy.mean || 0).toFixed(3)}).`);
-          lines.push(`  - Clinical significance: May indicate lethargy, hypotonia, or encephalopathy (Sarnat II/III).`);
-          lines.push(``);
+      try {
+          const payload = currentDatasets.map(d => ({
+              label: d.label,
+              stats: d.stats
+          }));
+          const res = await fetch(`${SERVER_URL}/compare/automated_report`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ datasets: payload })
+          });
+          if (res.ok) {
+              const data = await res.json();
+              setReport(data.report);
+          }
+      } catch (e) {
+          console.error("Failed to generate automated report", e);
       }
-
-      lines.push(`• HIGHEST ACTIVITY INTENSITY: ${maxJerk.label}`);
-      lines.push(`  - Peak Jerk Index: ${(maxJerk.stats?.fluency_jerk.mean || 0).toFixed(2)}`);
-      lines.push(`  - Clinical significance: If excessive (>8.0), consider jitteriness, hyperexcitability, or tremors.`);
-      lines.push(``);
-
-      lines.push(`----------------------------------------------------------------`);
-      lines.push(`2. DETAILED BIOMARKER PROFILES`);
-      lines.push(`----------------------------------------------------------------`);
-
-      currentDatasets.forEach(d => {
-          const e = d.stats?.entropy.mean || 0;
-          const v = d.stats?.fluency_velocity.mean || 0;
-          const j = d.stats?.fluency_jerk.mean || 0;
-          const f = d.stats?.fractal_dim.mean || 0;
-          const ke = d.stats?.kinetic_energy.mean || 0;
-
-          lines.push(`SUBJECT: ${d.label}`);
-          lines.push(`  • Entropy (Complexity):   ${e.toFixed(3)} [Norm: >0.6]`);
-          lines.push(`  • Velocity (Activity):    ${v.toFixed(3)}`);
-          lines.push(`  • Jerk (Smoothness):      ${j.toFixed(3)} [Norm: <7.0]`);
-          lines.push(`  • Fractal Dim (Texture):  ${f.toFixed(3)}`);
-          lines.push(`  • Kinetic Energy (PhysX): ${ke.toFixed(2)} J`);
-
-          let impression = [];
-          if (e < 0.4) impression.push("Markedly reduced complexity (Warning)");
-          else if (e < 0.6) impression.push("Mildly reduced complexity");
-          else impression.push("Normal complexity");
-
-          if (j > 8.0) impression.push("High frequency tremors detected");
-
-          lines.push(`  => INTERPRETATION: ${impression.join(", ")}`);
-          lines.push(``);
-      });
-
-      if (currentDatasets.length === 2) {
-          lines.push(`----------------------------------------------------------------`);
-          lines.push(`3. DIRECT COMPARISON (${currentDatasets[0].label} vs ${currentDatasets[1].label})`);
-          lines.push(`----------------------------------------------------------------`);
-          const d1 = currentDatasets[0];
-          const d2 = currentDatasets[1];
-
-          const eDiff = ((d1.stats?.entropy.mean || 0) - (d2.stats?.entropy.mean || 0));
-          const vDiff = ((d1.stats?.fluency_velocity.mean || 0) - (d2.stats?.fluency_velocity.mean || 0));
-          const jDiff = ((d1.stats?.fluency_jerk.mean || 0) - (d2.stats?.fluency_jerk.mean || 0));
-
-          lines.push(`• ENTROPY: ${d1.label} is ${Math.abs(eDiff / (d2.stats?.entropy.mean || 1) * 100).toFixed(1)}% ${eDiff > 0 ? 'more' : 'less'} complex.`);
-          lines.push(`• VELOCITY: ${d1.label} is ${Math.abs(vDiff / (d2.stats?.fluency_velocity.mean || 1) * 100).toFixed(1)}% ${vDiff > 0 ? 'faster' : 'slower'}.`);
-          lines.push(`• JERK: ${d1.label} is ${Math.abs(jDiff / (d2.stats?.fluency_jerk.mean || 1) * 100).toFixed(1)}% ${jDiff > 0 ? 'jitterier' : 'smoother'}.`);
-      }
-
-      lines.push(``);
-      lines.push(`Report generated automatically by NeuroMotion AI.`);
-
-      setReport(lines.join('\n'));
   };
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const getComparisonSummary = () => {
     return datasets.map(d =>
@@ -168,30 +94,18 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
     if (datasets.length < 1) return;
     setIsGeneratingReport(true);
 
-    const summaryData = getComparisonSummary();
-    const prompt = `
-      You are an expert Biomechanics Data Scientist.
-      Analyze the difference between the following motion sessions based on these computed metrics:
-
-      ${summaryData}
-
-      Provide a concise 3-paragraph summary:
-      1. Performance Comparison (Intensity, Kinetic Energy & Output)
-      2. Stability & Control Analysis (Root Stress & Entropy/Complexity)
-      3. Kinematic Variability & Smoothness.
-
-      STRICT REQUIREMENT: Focus ONLY on the physics, movement patterns, and data trends.
-      DO NOT provide any medical diagnoses, clinical interpretations (e.g. Sarnat stages, CP), or medical advice.
-
-      Use professional technical language.
-    `;
-
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
+        const res = await fetch(`${SERVER_URL}/compare/ai_report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataset_summaries: getComparisonSummary() })
         });
-        setAiReport(response.text || "No analysis generated.");
+        if (res.ok) {
+            const data = await res.json();
+            setAiReport(data.report || "No analysis generated.");
+        } else {
+            setAiReport("Failed to generate analysis. Please check API connection.");
+        }
     } catch (e) {
         console.error("AI Error", e);
         setAiReport("Failed to generate analysis. Please check API connection.");
@@ -209,24 +123,21 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onBack, initialR
     setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsChatLoading(true);
 
-    const summaryData = getComparisonSummary();
-    const prompt = `
-      Context: The user is looking at a dashboard comparing motion capture sessions.
-      Data Summary:
-      ${summaryData}
-
-      User Question: "${userMsg}"
-
-      Answer the user specifically using the data provided. Keep it helpful, encouraging, and brief (under 50 words if possible).
-    `;
-
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: { systemInstruction: "You are a helpful AI Sports Science and Biomechanics Assistant." }
+        const res = await fetch(`${SERVER_URL}/compare/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: userMsg,
+                dataset_summaries: getComparisonSummary()
+            })
         });
-        setChatHistory(prev => [...prev, { role: 'ai', text: response.text || "I couldn't generate a response." }]);
+        if (res.ok) {
+            const data = await res.json();
+            setChatHistory(prev => [...prev, { role: 'ai', text: data.response || "I couldn't generate a response." }]);
+        } else {
+            setChatHistory(prev => [...prev, { role: 'ai', text: "Error connecting to AI service." }]);
+        }
     } catch (err) {
         setChatHistory(prev => [...prev, { role: 'ai', text: "Error connecting to AI service." }]);
     } finally {

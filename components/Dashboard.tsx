@@ -10,18 +10,19 @@ interface DashboardProps {
   onTrainingMode: () => void;
   onComparisonMode: () => void;
   onValidationView: () => void;
+  onGraphsView: () => void;
   onViewReport: (report: SavedReport) => void;
   onCompareReports: (reports: SavedReport[]) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiveAnalysis, onTrainingMode, onComparisonMode, onValidationView, onViewReport, onCompareReports }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiveAnalysis, onTrainingMode, onComparisonMode, onValidationView, onGraphsView, onViewReport, onCompareReports }) => {
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [learnedStats, setLearnedStats] = useState<{ totalLearned: number, breakdown: Record<string, number> }>({ totalLearned: 0, breakdown: {} });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setReports(storageService.getReports(user.id));
-    setLearnedStats(storageService.getLearnedStats(user.id));
+    storageService.getReports(user.id).then(setReports);
+    storageService.getLearnedStats(user.id).then(setLearnedStats);
   }, [user.id]);
 
   const toggleSelection = (id: string) => {
@@ -36,10 +37,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
     onCompareReports(selected);
   };
 
-  const handleDelete = (e: React.MouseEvent, reportId: string) => {
+  const handleDelete = async (e: React.MouseEvent, reportId: string) => {
     e.stopPropagation();
     if (!window.confirm('Delete this assessment? This cannot be undone.')) return;
-    storageService.deleteReport(user.id, reportId);
+    await storageService.deleteReport(user.id, reportId);
     setReports(prev => prev.filter(r => r.id !== reportId));
     setSelectedIds(prev => { const next = new Set(prev); next.delete(reportId); return next; });
   };
@@ -86,7 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
       </div>
 
       {/* Action Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <button
             onClick={onNewAnalysis}
             className="flex flex-col items-center gap-2 px-4 py-5 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800 transition-colors"
@@ -121,6 +122,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
         >
             <i className="fas fa-columns text-sm"></i>
             <span className="text-xs font-medium">Compare</span>
+        </button>
+        <button
+            onClick={onGraphsView}
+            className="flex flex-col items-center gap-2 px-4 py-5 bg-white border border-neutral-200 text-neutral-700 rounded-lg hover:bg-neutral-50 hover:border-neutral-300 transition-colors"
+        >
+            <i className="fas fa-chart-line text-sm"></i>
+            <span className="text-xs font-medium">Graphs</span>
         </button>
       </div>
 

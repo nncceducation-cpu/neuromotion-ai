@@ -12,6 +12,7 @@ import asyncio
 import json
 import time
 import math
+import uuid
 import numpy as np
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -141,13 +142,81 @@ class ValidationRequest(BaseModel):
 # HELPER FUNCTIONS
 # ============================================================================
 
+JSONL_DIR = os.path.join(os.path.dirname(__file__), "analysis_logs")
+JSONL_FILE = os.path.join(JSONL_DIR, "gemini_predictions.jsonl")
+
+
+def _read_jsonl() -> List[Dict[str, Any]]:
+    """Read all entries from the JSONL predictions file."""
+    if not os.path.exists(JSONL_FILE):
+        return []
+    entries = []
+    with open(JSONL_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entries.append(json.loads(line))
+    return entries
+
+
+def _write_jsonl(entries: List[Dict[str, Any]]):
+    """Rewrite the entire JSONL predictions file."""
+    os.makedirs(JSONL_DIR, exist_ok=True)
+    with open(JSONL_FILE, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+
+
+def _jsonl_entry_to_report(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform a JSONL entry into SavedReport shape for the frontend."""
+    pred = entry.get("gemini_prediction") or {}
+    bio = entry.get("biomarkers") or {}
+    meta = entry.get("metadata") or {}
+
+    expert_correction = None
+    if entry.get("ground_truth"):
+        expert_correction = {
+            "correctClassification": entry["ground_truth"],
+            "notes": entry.get("doctor_notes") or "",
+            "timestamp": entry.get("validated_at") or entry.get("timestamp", ""),
+            "clinicianName": "Validator",
+        }
+    if entry.get("expert_correction"):
+        expert_correction = entry["expert_correction"]
+
+    return {
+        "id": entry.get("id") or entry.get("timestamp", str(uuid.uuid4())),
+        "date": entry.get("timestamp", ""),
+        "videoName": meta.get("filename") or "Unknown",
+        "classification": pred.get("classification", "Normal"),
+        "confidence": pred.get("confidence", 0),
+        "seizureDetected": pred.get("seizureDetected", False),
+        "seizureType": pred.get("seizureType", "None"),
+        "differentialAlert": pred.get("differentialAlert"),
+        "clinicalAnalysis": pred.get("clinicalAnalysis", ""),
+        "recommendations": pred.get("recommendations", []),
+        "rawData": {
+            "entropy": bio.get("average_sample_entropy", 0),
+            "fluency": bio.get("average_jerk", 0),
+            "complexity": bio.get("average_fractal_dimension", 0),
+            "variabilityIndex": 0,
+            "csRiskScore": 0,
+            "avg_kinetic_energy": bio.get("average_kinetic_energy", 0),
+            "avg_root_stress": bio.get("average_root_stress", 0),
+            "posture": {"headControl": "Normal", "trunkStability": "Normal", "limbSymmetry": "Normal", "overallPosture": "Normal"},
+            "seizure": {"rhythmicMovement": False, "abnormalPosturing": False, "eyeDeviation": False, "apneaEvents": False, "overallSeizureRisk": "None"},
+        },
+        "timelineData": entry.get("timelineData"),
+        "expertCorrection": expert_correction,
+    }
+
+
 def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, Any],
                         ground_truth: Optional[str] = None, metadata: Optional[Dict] = None,
-                        first_frame_skeleton: Optional[Dict[str, Any]] = None):
-    """Logs analysis results to a JSONL file for future model training."""
-    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
+                        first_frame_skeleton: Optional[Dict[str, Any]] = None,
+                        timeline_data: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Logs analysis results to the JSONL file. Returns the generated entry id."""
+    os.makedirs(JSONL_DIR, exist_ok=True)
 
     skeleton_with_labels = None
     if first_frame_skeleton and "joints" in first_frame_skeleton:
@@ -164,22 +233,27 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
             "note": "All 17 COCO keypoints - verify YOLO26 detected pose correctly"
         }
 
+    entry_id = str(uuid.uuid4())
     log_entry = {
+        "id": entry_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "biomarkers": biomarkers,
         "gemini_prediction": gemini_response,
         "ground_truth": ground_truth,
         "doctor_notes": None,
         "first_frame_skeleton": skeleton_with_labels,
-        "metadata": metadata or {}
+        "metadata": metadata or {},
+        "timelineData": timeline_data,
     }
 
     try:
-        with open(log_file, "a", encoding="utf-8") as f:
+        with open(JSONL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
-        print(f"Logged analysis to {log_file}")
+        print(f"Logged analysis to {JSONL_FILE}")
     except Exception as e:
         print(f"Warning: Failed to log analysis: {e}")
+
+    return entry_id
 
 
 def generate_gemini_report(biomarkers: Dict[str, Any]):
@@ -368,15 +442,16 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
 
     report = generate_gemini_report(biomarkers)
 
-    log_analysis_result(
+    entry_id = log_analysis_result(
         biomarkers=biomarkers,
         gemini_response=report,
         ground_truth=None,
         metadata={"source": "frontend_mediapipe", "frame_count": len(request.frames)},
-        first_frame_skeleton=request.frames[0] if request.frames else None
+        first_frame_skeleton=request.frames[0] if request.frames else None,
+        timeline_data=metrics,
     )
 
-    return {"metrics": metrics, "biomarkers": biomarkers, "report": report}
+    return {"metrics": metrics, "biomarkers": biomarkers, "report": report, "entry_id": entry_id}
 
 
 @app.post("/upload_video")
@@ -435,7 +510,7 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
 
         report = generate_gemini_report(biomarkers)
 
-        log_analysis_result(
+        entry_id = log_analysis_result(
             biomarkers=biomarkers,
             gemini_response=report,
             ground_truth=None,
@@ -444,12 +519,14 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
                 "filename": file.filename,
                 "frames_processed": len(skeleton_frames)
             },
-            first_frame_skeleton=skeleton_frames[0] if skeleton_frames else None
+            first_frame_skeleton=skeleton_frames[0] if skeleton_frames else None,
+            timeline_data=metrics,
         )
 
         return {
             "metrics": metrics, "biomarkers": biomarkers,
-            "report": report, "frames_processed": len(skeleton_frames)
+            "report": report, "frames_processed": len(skeleton_frames),
+            "entry_id": entry_id,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -549,80 +626,54 @@ OUTPUT JSON ONLY (The new MotionConfig object).
 @app.post("/validate")
 async def validate_prediction(request: ValidationRequest):
     """Endpoint for doctors to submit ground truth labels for AI predictions."""
-    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
-    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
-
-    if not os.path.exists(log_file):
+    entries = _read_jsonl()
+    if not entries:
         raise HTTPException(status_code=404, detail="No analysis logs found")
 
-    try:
-        entries = []
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                entries.append(json.loads(line))
+    matched_entry = None
+    for entry in entries:
+        if entry.get("timestamp") == request.timestamp:
+            entry["ground_truth"] = request.ground_truth_classification
+            entry["doctor_notes"] = request.doctor_notes
+            entry["validated_at"] = datetime.now(timezone.utc).isoformat()
+            matched_entry = entry
+            break
 
-        matched_entry = None
-        for entry in entries:
-            if entry["timestamp"] == request.timestamp:
-                entry["ground_truth"] = request.ground_truth_classification
-                entry["doctor_notes"] = request.doctor_notes
-                entry["validated_at"] = datetime.now(timezone.utc).isoformat()
-                matched_entry = entry
-                break
+    if matched_entry is None:
+        raise HTTPException(status_code=404, detail=f"No analysis found with timestamp {request.timestamp}")
 
-        if matched_entry is None:
-            raise HTTPException(status_code=404, detail=f"No analysis found with timestamp {request.timestamp}")
+    _write_jsonl(entries)
 
-        with open(log_file, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry) + "\n")
+    ai_classification = (matched_entry.get("gemini_prediction") or {}).get("classification", "Unknown")
+    add_correction(
+        biomarkers=matched_entry.get("biomarkers", {}),
+        ai_classification=ai_classification,
+        doctor_classification=request.ground_truth_classification,
+        doctor_notes=request.doctor_notes,
+    )
 
-        ai_classification = (matched_entry.get("gemini_prediction") or {}).get("classification", "Unknown")
-        add_correction(
-            biomarkers=matched_entry.get("biomarkers", {}),
-            ai_classification=ai_classification,
-            doctor_classification=request.ground_truth_classification,
-            doctor_notes=request.doctor_notes,
-        )
-
-        return {
-            "status": "success",
-            "message": f"Ground truth label '{request.ground_truth_classification}' saved. Gemini cache updated."
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+    return {
+        "status": "success",
+        "message": f"Ground truth label '{request.ground_truth_classification}' saved. Gemini cache updated."
+    }
 
 
 @app.get("/pending_validations")
 async def get_pending_validations(limit: int = 50, include_validated: bool = False):
     """Fetch analysis cases that need doctor validation."""
-    log_dir = os.path.join(os.path.dirname(__file__), "analysis_logs")
-    log_file = os.path.join(log_dir, "gemini_predictions.jsonl")
+    entries = _read_jsonl()
 
-    if not os.path.exists(log_file):
-        return {"cases": [], "total": 0}
+    if not include_validated:
+        entries = [e for e in entries if not e.get("ground_truth")]
 
-    try:
-        entries = []
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                entries.append(json.loads(line))
+    entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    entries = entries[:limit]
 
-        if not include_validated:
-            entries = [e for e in entries if not e.get("ground_truth")]
-
-        entries.sort(key=lambda x: x["timestamp"], reverse=True)
-        entries = entries[:limit]
-
-        return {
-            "cases": entries,
-            "total": len(entries),
-            "showing": "all" if include_validated else "unvalidated_only"
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch validations: {str(e)}")
+    return {
+        "cases": entries,
+        "total": len(entries),
+        "showing": "all" if include_validated else "unvalidated_only"
+    }
 
 
 # ============================================================================
@@ -673,51 +724,94 @@ async def auth_logout(authorization: Optional[str] = Header(None)):
 
 
 # ============================================================================
-# NEW: REPORT CRUD ENDPOINTS (converted from services/storage.ts)
+# REPORT CRUD ENDPOINTS — backed by gemini_predictions.jsonl
 # ============================================================================
 
 @app.get("/reports/{user_id}")
 async def get_reports(user_id: str):
-    """Get all saved reports for a user."""
-    return storage_service.get_reports(user_id)
+    """Get all analysis reports from the JSONL log."""
+    entries = _read_jsonl()
+    entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return [_jsonl_entry_to_report(e) for e in entries]
 
 
 @app.post("/reports/{user_id}")
 async def save_report(user_id: str, request: SaveReportRequest):
-    """Save a new analysis report."""
-    report_dict = request.report.model_dump()
-    saved = storage_service.save_report(user_id, report_dict, request.videoName)
-    return saved
+    """No-op: analyses are already saved to JSONL during processing.
+    Returns the most recent JSONL entry as a SavedReport for backward compat."""
+    entries = _read_jsonl()
+    if entries:
+        return _jsonl_entry_to_report(entries[-1])
+    return {}
 
 
 @app.delete("/reports/{user_id}/{report_id}")
 async def delete_report(user_id: str, report_id: str):
-    """Delete a specific report."""
-    storage_service.delete_report(user_id, report_id)
+    """Delete a report entry from the JSONL log."""
+    entries = _read_jsonl()
+    original_len = len(entries)
+    entries = [e for e in entries if e.get("id") != report_id and e.get("timestamp") != report_id]
+    if len(entries) == original_len:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _write_jsonl(entries)
     return {"status": "success"}
 
 
 @app.post("/reports/{user_id}/{report_id}/correction")
 async def save_correction(user_id: str, report_id: str, request: CorrectionRequest):
-    """Save an expert correction to a report."""
-    updated = storage_service.save_expert_correction(
-        user_id, report_id, request.correction.model_dump()
-    )
-    if not updated:
+    """Save an expert correction to a JSONL entry."""
+    entries = _read_jsonl()
+    matched = None
+    for entry in entries:
+        if entry.get("id") == report_id or entry.get("timestamp") == report_id:
+            entry["expert_correction"] = request.correction.model_dump()
+            entry["ground_truth"] = request.correction.correctClassification
+            entry["doctor_notes"] = request.correction.notes
+            entry["validated_at"] = datetime.now(timezone.utc).isoformat()
+            matched = entry
+            break
+    if not matched:
         raise HTTPException(status_code=404, detail="Report not found")
-    return updated
+    _write_jsonl(entries)
+
+    # Update Gemini cache
+    ai_classification = (matched.get("gemini_prediction") or {}).get("classification", "Unknown")
+    add_correction(
+        biomarkers=matched.get("biomarkers", {}),
+        ai_classification=ai_classification,
+        doctor_classification=request.correction.correctClassification,
+        doctor_notes=request.correction.notes,
+    )
+
+    return _jsonl_entry_to_report(matched)
 
 
 @app.get("/training_examples")
 async def get_training_examples():
-    """Get all expert-corrected reports (last 10) for training."""
-    return storage_service.get_training_examples()
+    """Get all expert-corrected entries from JSONL (last 10) for training."""
+    entries = _read_jsonl()
+    examples = []
+    for e in entries:
+        correction = e.get("expert_correction")
+        if correction:
+            report = _jsonl_entry_to_report(e)
+            examples.append({
+                "inputs": report.get("rawData"),
+                "groundTruth": correction,
+            })
+    return examples[:10]
 
 
 @app.get("/learned_stats/{user_id}")
 async def get_learned_stats(user_id: str):
-    """Get aggregated correction stats for dashboard."""
-    return storage_service.get_learned_stats(user_id)
+    """Get aggregated correction stats from JSONL."""
+    entries = _read_jsonl()
+    corrections = [e for e in entries if e.get("expert_correction") or e.get("ground_truth")]
+    by_category: Dict[str, int] = {}
+    for e in corrections:
+        cat = (e.get("expert_correction") or {}).get("correctClassification") or e.get("ground_truth", "Unknown")
+        by_category[cat] = by_category.get(cat, 0) + 1
+    return {"totalLearned": len(corrections), "breakdown": by_category}
 
 
 # ============================================================================

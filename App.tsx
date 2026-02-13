@@ -433,7 +433,7 @@ const App: React.FC = () => {
         setStage(PipelineStage.CLASSIFIER);
 
         const completeReport = buildReportFromBackend(backendData.report, backendData.metrics);
-        const savedReport = await storageService.saveReport(user.id, completeReport, file.name);
+        const savedReport: SavedReport = { ...completeReport, id: backendData.entry_id || crypto.randomUUID(), date: new Date().toISOString(), videoName: file.name };
         await new Promise(resolve => setTimeout(resolve, 500));
         setStage(PipelineStage.COMPLETE); setReport(completeReport); setSelectedReport(savedReport);
         if (appMode === 'training') { setShowTrainingModal(true); }

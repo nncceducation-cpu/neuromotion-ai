@@ -1,21 +1,19 @@
 """
-JSON file-based storage service for user auth and report persistence.
-Converted from services/storage.ts (localStorage) to server-side JSON files.
+JSON file-based storage service for user auth.
+Report storage has been consolidated into gemini_predictions.jsonl (see api.py).
 """
 
 import json
 import os
 import uuid
-from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from filelock import FileLock  # pip install filelock
 
-from models import User, UserWithPassword, SavedReport, ExpertCorrection
+from models import User
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
-REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 
 
@@ -112,91 +110,3 @@ def get_current_user(token: str) -> Optional[User]:
     if not user_data:
         return None
     return User(**user_data)
-
-
-# --- Reports ---
-
-def save_report(user_id: str, report: Dict[str, Any], video_name: str) -> Dict[str, Any]:
-    """Save an analysis report for a user. Returns the saved report with id and date."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    user_reports = reports_map.get(user_id, [])
-
-    saved = {
-        **report,
-        "id": str(uuid.uuid4()),
-        "date": datetime.now(timezone.utc).isoformat(),
-        "videoName": video_name,
-    }
-
-    user_reports.insert(0, saved)  # Add to top (newest first)
-    reports_map[user_id] = user_reports
-    _write_json(REPORTS_FILE, reports_map)
-
-    return saved
-
-
-def get_reports(user_id: str) -> List[Dict[str, Any]]:
-    """Get all reports for a user."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    return reports_map.get(user_id, [])
-
-
-def delete_report(user_id: str, report_id: str):
-    """Delete a specific report."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    user_reports = reports_map.get(user_id, [])
-    reports_map[user_id] = [r for r in user_reports if r.get("id") != report_id]
-    _write_json(REPORTS_FILE, reports_map)
-
-
-def save_expert_correction(user_id: str, report_id: str, correction: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Attach an expert correction to a report."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    user_reports: List[Dict] = reports_map.get(user_id, [])
-
-    updated = None
-    for r in user_reports:
-        if r.get("id") == report_id:
-            r["expertCorrection"] = correction
-            updated = r
-            break
-
-    if updated:
-        reports_map[user_id] = user_reports
-        _write_json(REPORTS_FILE, reports_map)
-
-    return updated
-
-
-def get_training_examples() -> List[Dict[str, Any]]:
-    """Get all expert-corrected reports across all users (last 10)."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    examples = []
-
-    for user_reports in reports_map.values():
-        for r in user_reports:
-            if r.get("expertCorrection"):
-                examples.append({
-                    "inputs": r.get("rawData"),
-                    "groundTruth": r["expertCorrection"]
-                })
-
-    return examples[:10]
-
-
-def get_learned_stats(user_id: str) -> Dict[str, Any]:
-    """Get aggregated correction stats for dashboard."""
-    reports_map: Dict[str, List[Dict]] = _read_json(REPORTS_FILE, {})
-    user_reports = reports_map.get(user_id, [])
-
-    corrections = [r for r in user_reports if r.get("expertCorrection")]
-    by_category: Dict[str, int] = {}
-
-    for r in corrections:
-        cat = r["expertCorrection"].get("correctClassification", "Unknown")
-        by_category[cat] = by_category.get(cat, 0) + 1
-
-    return {
-        "totalLearned": len(corrections),
-        "breakdown": by_category
-    }

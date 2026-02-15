@@ -4,8 +4,10 @@ import os
 # 1. SETUP PATH: Add the current directory to sys.path so we can import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import asyncio
@@ -558,7 +560,12 @@ def health_check():
 
 @app.get("/")
 def root():
-    return {"message": "Neuromotion AI Backend is Running"}
+    """Serve frontend index.html if built, otherwise show API status."""
+    dist_dir = os.path.join(os.path.dirname(__file__), '..', 'dist')
+    index_path = os.path.join(dist_dir, 'index.html')
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Neuromotion AI Backend is Running. Run 'python app.py' to build and serve the frontend."}
 
 
 @app.post("/refine_config")
@@ -1058,3 +1065,23 @@ async def compare_automated_report(request: AutomatedReportRequest):
     lines.append("Report generated automatically by NeuroMotion AI.")
 
     return {"report": "\n".join(lines)}
+
+
+# ============================================================================
+# STATIC FILE SERVING — mount built frontend (must be LAST)
+# ============================================================================
+
+_dist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'dist')
+
+if os.path.isdir(_dist_dir):
+    # Serve static assets (JS, CSS, images) from /assets/
+    app.mount("/assets", StaticFiles(directory=os.path.join(_dist_dir, "assets")), name="static-assets")
+
+    # SPA catch-all: any unmatched GET route serves index.html
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # Try to serve a static file first (e.g. favicon.ico, vite.svg)
+        file_path = os.path.join(_dist_dir, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_dist_dir, "index.html"))

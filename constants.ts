@@ -9,7 +9,7 @@ export const STAGES: StageConfig[] = [
   { id: PipelineStage.COMPLETE, label: "Results", icon: "fa-clipboard-check", description: "Clinical assessment report" }
 ];
 
-export const SERVER_URL = "http://localhost:8000";
+export const SERVER_URL = "";
 
 // --- API helpers for trajectory generation (logic moved to Python backend) ---
 

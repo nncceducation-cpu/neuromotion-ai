@@ -45,13 +45,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
     setSelectedIds(prev => { const next = new Set(prev); next.delete(reportId); return next; });
   };
 
-  const handleExportCSV = (e: React.MouseEvent, report: SavedReport) => {
-    e.stopPropagation();
-    if (!report.timelineData || report.timelineData.length === 0) {
-        alert("No raw data available for this report.");
-        return;
-    }
-
+  const buildCSV = (report: SavedReport): string | null => {
+    if (!report.timelineData || report.timelineData.length === 0) return null;
     const headers = ['timestamp', 'entropy', 'fluency_velocity', 'fluency_jerk', 'fractal_dim', 'phase_x', 'phase_v', 'kinetic_energy', 'angular_jerk', 'root_stress'];
     const rows = report.timelineData.map(row => [
         row.timestamp,
@@ -65,16 +60,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
         (row.angular_jerk ?? 0).toFixed(4),
         row.root_stress.toFixed(4)
     ].join(','));
+    return headers.join(',') + "\n" + rows.join("\n");
+  };
 
-    const csvContent = "data:text/csv;charset=utf-8," + headers.join(',') + "\n" + rows.join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `neuromotion_${report.videoName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date(report.date).getTime()}.csv`);
+  const csvFilename = (report: SavedReport) =>
+    `neuromotion_${report.videoName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date(report.date).getTime()}.csv`;
+
+  const downloadBlob = (content: string, filename: string, mime = 'text/csv') => {
+    const blob = new Blob([content], { type: `${mime};charset=utf-8;` });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
   };
+
+  const handleExportCSV = (e: React.MouseEvent, report: SavedReport) => {
+    e.stopPropagation();
+    const csv = buildCSV(report);
+    if (!csv) { alert("No raw data available for this report."); return; }
+    downloadBlob(csv, csvFilename(report));
+  };
+
+  const handleDownloadAll = async () => {
+    const targets = selectedIds.size > 0
+      ? reports.filter(r => selectedIds.has(r.id))
+      : reports;
+    const exportable = targets.filter(r => r.timelineData && r.timelineData.length > 0);
+    if (exportable.length === 0) {
+      alert('No reports with exportable data.');
+      return;
+    }
+    for (const report of exportable) {
+      const csv = buildCSV(report);
+      if (csv) downloadBlob(csv, csvFilename(report));
+      // Small delay so browser doesn't block multiple downloads
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === reports.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(reports.map(r => r.id)));
+    }
+  };
+
+  const allSelected = reports.length > 0 && selectedIds.size === reports.length;
 
   return (
     <div className="animate-fade-in space-y-8 pb-24">
@@ -158,10 +193,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onNewAnalysis, onLiv
 
               {/* Recent Assessments */}
               <div className="bg-white rounded-lg border border-neutral-200 overflow-hidden">
-                <div className="px-5 py-4 border-b border-neutral-100 flex justify-between items-center">
-                    <h2 className="font-semibold text-neutral-900 text-sm">Recent Assessments</h2>
+                <div className="px-5 py-4 border-b border-neutral-100 flex justify-between items-center gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <h2 className="font-semibold text-neutral-900 text-sm whitespace-nowrap">Recent Assessments</h2>
+                        {selectedIds.size > 0 && (
+                            <span className="text-xs text-neutral-400 whitespace-nowrap">{selectedIds.size} selected</span>
+                        )}
+                    </div>
                     {selectedIds.size > 0 && (
-                        <span className="text-xs text-neutral-500">{selectedIds.size} selected</span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                                onClick={toggleSelectAll}
+                                className="text-xs px-2.5 py-1 rounded border border-neutral-200 text-neutral-500 hover:text-neutral-700 hover:border-neutral-300 transition-colors whitespace-nowrap"
+                            >
+                                {allSelected ? 'Deselect All' : 'Select All'}
+                            </button>
+                            <button
+                                onClick={handleDownloadAll}
+                                className="text-xs px-2.5 py-1 rounded border border-neutral-200 text-neutral-500 hover:text-neutral-700 hover:border-neutral-300 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                                title={`Download ${selectedIds.size} selected as CSV`}
+                            >
+                                <i className="fas fa-download text-[10px]"></i>
+                                Download ({selectedIds.size})
+                            </button>
+                        </div>
                     )}
                 </div>
 

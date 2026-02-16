@@ -79,6 +79,12 @@ class MovementMetrics(BaseModel):
     kinetic_energy: float = 0.0
     angular_jerk: float = 0.0
     root_stress: float = 0.0
+    bilateral_symmetry: float = 0.0
+    lower_limb_kinetic_energy: float = 0.0
+    com_velocity: float = 0.0
+    head_stability: float = 0.0
+    avg_visibility: float = 1.0  # Mean pose detection confidence across tracked joints
+    min_visibility: float = 1.0  # Minimum joint confidence in this frame
 
 
 class PostureMetrics(BaseModel):
@@ -130,6 +136,11 @@ class RawData(BaseModel):
     seizure: SeizureMetrics = SeizureMetrics()
     avg_kinetic_energy: float = 0.0
     avg_root_stress: float = 0.0
+    avg_bilateral_symmetry: float = 0.0
+    avg_lower_limb_ke: float = 0.0
+    avg_angular_jerk: float = 0.0
+    avg_head_stability: float = 0.0
+    avg_com_velocity: float = 0.0
 
 
 class AnalysisReport(BaseModel):
@@ -229,17 +240,21 @@ class ClinicalProfileInfo(BaseModel):
     features: ClinicalProfileFeatures
 
 
-class ComparisonDatasetStats(BaseModel):
-    mean: float = 0.0
-    min: float = 0.0
-    max: float = 0.0
-    std: float = 0.0
+# --- Request/Response Models ---
+
+class AnalysisRequest(BaseModel):
+    frames: List[Dict[str, Any]]
+    config: MotionConfig
 
 
-class AggregatedStats(BaseModel):
-    isEncephalopathy: bool = False
-    dominantSarnatStage: str = ""
-    avgEntropy: float = 0.0
-    maxSeizureProb: float = 0.0
-    windowDuration: float = 0.0
-    interictalConsciousness: str = ""
+class RefineConfigRequest(BaseModel):
+    current_report: Optional[Dict[str, Any]] = None
+    expert_diagnosis: str
+    annotation: str = ""
+    current_config: Dict[str, float]
+
+
+class ValidationRequest(BaseModel):
+    timestamp: str
+    ground_truth_classification: str
+    doctor_notes: Optional[str] = None

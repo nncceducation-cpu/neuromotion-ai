@@ -99,17 +99,17 @@ def analyze_confidence(logs: list):
     min_conf = min(confidences)
     max_conf = max(confidences)
 
-    # Group by confidence ranges
+    # Group by confidence ranges (0-100 integer scale)
     ranges = {
-        "Very Low (0.0-0.5)": sum(1 for c in confidences if c < 0.5),
-        "Low (0.5-0.7)": sum(1 for c in confidences if 0.5 <= c < 0.7),
-        "Medium (0.7-0.85)": sum(1 for c in confidences if 0.7 <= c < 0.85),
-        "High (0.85-1.0)": sum(1 for c in confidences if c >= 0.85)
+        "Very Low (0-20)":  sum(1 for c in confidences if c < 20),
+        "Low (20-50)":      sum(1 for c in confidences if 20 <= c < 50),
+        "Medium (50-85)":   sum(1 for c in confidences if 50 <= c < 85),
+        "High (85-100)":    sum(1 for c in confidences if c >= 85)
     }
 
     print("\n🎯 CONFIDENCE DISTRIBUTION")
-    print(f"   Average confidence: {avg_conf:.2f}")
-    print(f"   Range: {min_conf:.2f} to {max_conf:.2f}")
+    print(f"   Average confidence: {avg_conf:.0f}%")
+    print(f"   Range: {min_conf:.0f}% to {max_conf:.0f}%")
     print("\n   Breakdown:")
     for range_name, count in ranges.items():
         pct = count / len(confidences) * 100
@@ -142,16 +142,34 @@ def identify_review_candidates(logs: list):
 
 def analyze_biomarker_stats(logs: list):
     """Show biomarker value distributions."""
-    entropies = [log["biomarkers"]["average_sample_entropy"] for log in logs]
-    jerks = [log["biomarkers"]["average_jerk"] for log in logs]
+    def safe_get(log, key):
+        return log.get("biomarkers", {}).get(key, 0)
+
+    biomarker_keys = [
+        ("average_sample_entropy", "Sample Entropy"),
+        ("average_jerk", "Jerk (Fluency)"),
+        ("average_fractal_dimension", "Fractal Dimension"),
+        ("average_kinetic_energy", "Kinetic Energy"),
+        ("average_root_stress", "Root Stress"),
+        ("bilateral_symmetry_index", "Bilateral Symmetry"),
+        ("average_lower_limb_ke", "Lower Limb KE"),
+        ("angular_jerk_index", "Angular Jerk"),
+        ("head_stability_index", "Head Stability"),
+        ("average_com_velocity", "CoM Velocity"),
+        ("elbow_rom", "Elbow ROM"),
+        ("knee_rom", "Knee ROM"),
+    ]
 
     print("\n📐 BIOMARKER STATISTICS")
-    print(f"   Average Sample Entropy:")
-    print(f"     Mean: {sum(entropies)/len(entropies):.3f}")
-    print(f"     Range: {min(entropies):.3f} to {max(entropies):.3f}")
-    print(f"   Average Jerk:")
-    print(f"     Mean: {sum(jerks)/len(jerks):.3f}")
-    print(f"     Range: {min(jerks):.3f} to {max(jerks):.3f}")
+    for key, label in biomarker_keys:
+        values = [safe_get(log, key) for log in logs]
+        values = [v for v in values if v != 0]
+        if values:
+            mean = sum(values) / len(values)
+            print(f"   {label}:")
+            print(f"     Mean: {mean:.3f}  Range: {min(values):.3f} to {max(values):.3f}  (n={len(values)})")
+        else:
+            print(f"   {label}: no data")
 
 
 def main():

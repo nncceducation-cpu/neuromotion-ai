@@ -4,11 +4,8 @@ import os
 # 1. SETUP PATH: Add the current directory to sys.path so we can import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
@@ -27,7 +24,8 @@ from models import (
     MotionConfig, AnalysisReport, SavedReport, ExpertCorrection, User,
     LoginRequest, RegisterRequest, SaveReportRequest, CorrectionRequest,
     TrajectoryRequest, CompareAIReportRequest, CompareChatRequest,
-    CompareStatsRequest, AutomatedReportRequest, ClinicalProfileInfo,
+    CompareStatsRequest, AutomatedReportRequest,
+    AnalysisRequest, RefineConfigRequest, ValidationRequest,
 )
 
 # 3. IMPORT: Storage service
@@ -117,30 +115,6 @@ app.add_middleware(
 )
 
 # ============================================================================
-# LEGACY REQUEST MODELS (kept for existing endpoints)
-# ============================================================================
-
-class AnalysisRequest(BaseModel):
-    frames: List[Dict[str, Any]]
-    config: MotionConfig
-
-class AnalysisResponse(BaseModel):
-    metrics: List[Dict[str, Any]]
-    biomarkers: Dict[str, Any]
-    report: Dict[str, Any]
-
-class RefineConfigRequest(BaseModel):
-    current_report: Optional[Dict[str, Any]] = None
-    expert_diagnosis: str
-    annotation: str = ""
-    current_config: Dict[str, float]
-
-class ValidationRequest(BaseModel):
-    timestamp: str
-    ground_truth_classification: str
-    doctor_notes: Optional[str] = None
-
-# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -197,17 +171,7 @@ def _jsonl_entry_to_report(entry: Dict[str, Any]) -> Dict[str, Any]:
         "differentialAlert": pred.get("differentialAlert"),
         "clinicalAnalysis": pred.get("clinicalAnalysis", ""),
         "recommendations": pred.get("recommendations", []),
-        "rawData": {
-            "entropy": bio.get("average_sample_entropy", 0),
-            "fluency": bio.get("average_jerk", 0),
-            "complexity": bio.get("average_fractal_dimension", 0),
-            "variabilityIndex": 0,
-            "csRiskScore": 0,
-            "avg_kinetic_energy": bio.get("average_kinetic_energy", 0),
-            "avg_root_stress": bio.get("average_root_stress", 0),
-            "posture": {"headControl": "Normal", "trunkStability": "Normal", "limbSymmetry": "Normal", "overallPosture": "Normal"},
-            "seizure": {"rhythmicMovement": False, "abnormalPosturing": False, "eyeDeviation": False, "apneaEvents": False, "overallSeizureRisk": "None"},
-        },
+        "rawData": build_raw_data(bio),
         "timelineData": entry.get("timelineData"),
         "expertCorrection": expert_correction,
     }
@@ -258,6 +222,121 @@ def log_analysis_result(biomarkers: Dict[str, Any], gemini_response: Dict[str, A
     return entry_id
 
 
+def build_raw_data(
+    biomarkers: Dict[str, Any],
+    posture: Optional[Dict[str, Any]] = None,
+    seizure: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the rawData object from aggregated biomarkers for frontend consumption."""
+    return {
+        "entropy": biomarkers.get("average_sample_entropy", 0),
+        "fluency": biomarkers.get("average_jerk", 0),
+        "complexity": biomarkers.get("average_fractal_dimension", 0),
+        "variabilityIndex": biomarkers.get("variability_index", 0),
+        "csRiskScore": biomarkers.get("cs_risk_score", 0),
+        "avg_kinetic_energy": biomarkers.get("average_kinetic_energy", 0),
+        "avg_root_stress": biomarkers.get("average_root_stress", 0),
+        "avg_bilateral_symmetry": biomarkers.get("bilateral_symmetry_index", 0),
+        "avg_lower_limb_ke": biomarkers.get("average_lower_limb_ke", 0),
+        "avg_angular_jerk": biomarkers.get("angular_jerk_index", 0),
+        "avg_head_stability": biomarkers.get("head_stability_index", 0),
+        "avg_com_velocity": biomarkers.get("average_com_velocity", 0),
+        "posture": posture or {
+            "shoulder_flexion_index": 0, "hip_flexion_index": 0,
+            "symmetry_score": 1.0, "tone_label": "Normal",
+            "frog_leg_score": 0, "spontaneous_activity": 0,
+            "sustained_posture_score": 0, "crying_index": 0,
+            "eye_openness_index": 0, "arousal_index": 0,
+            "state_transition_probability": 0,
+        },
+        "seizure": seizure or {
+            "rhythmicity_score": 0, "stiffness_score": 0,
+            "eye_deviation_score": 0, "dominant_frequency": 0,
+            "limb_synchrony": 0, "calculated_type": "None",
+        },
+    }
+
+
+def aggregate_biomarkers(metrics: List[Dict[str, Any]], source: str = "Python/YOLO26-Pipeline",
+                         extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Aggregate per-frame metrics into summary biomarkers for Gemini classification."""
+    ents = [m.get('entropy', 0) for m in metrics]
+    jerks = [m.get('fluency_jerk', 0) for m in metrics]
+    fractals = [m.get('fractal_dim', 0) for m in metrics]
+    kes = [m.get('kinetic_energy', 0) for m in metrics]
+    rss = [m.get('root_stress', 0) for m in metrics]
+    syms = [m.get('bilateral_symmetry', 0) for m in metrics]
+    ll_kes = [m.get('lower_limb_kinetic_energy', 0) for m in metrics]
+    ang_jerks = [m.get('angular_jerk', 0) for m in metrics]
+    head_stabs = [m.get('head_stability', 0) for m in metrics]
+    com_vels = [m.get('com_velocity', 0) for m in metrics]
+    visibilities = [m.get('avg_visibility', 1.0) for m in metrics]
+
+    # Confidence-weighted aggregation: high-confidence frames count more
+    vis_weights = np.array(visibilities)
+    vis_sum = vis_weights.sum()
+    if vis_sum > 0:
+        w = vis_weights / vis_sum
+    else:
+        w = np.ones(len(metrics)) / max(1, len(metrics))
+
+    # Variability index: standard deviation of entropy
+    variability_index = float(np.std(ents)) if ents else 0.0
+
+    # CS Risk Score: autocorrelation of bilateral wrist signal at lag 1
+    cs_risk_score = 0.0
+    if len(ents) > 2:
+        ents_arr = np.array(ents)
+        ents_centered = ents_arr - np.mean(ents_arr)
+        var = np.var(ents_arr)
+        if var > 1e-10:
+            cs_risk_score = float(np.correlate(ents_centered[:-1], ents_centered[1:])[0] / (var * (len(ents_arr) - 1)))
+
+    biomarkers = {
+        "average_sample_entropy": float(np.average(ents, weights=w)),
+        "peak_sample_entropy": float(np.max(ents)),
+        "average_jerk": float(np.average(jerks, weights=w)) if jerks else 0.0,
+        "average_fractal_dimension": float(np.average(fractals, weights=w)),
+        "peak_fractal_dimension": float(np.max(fractals)),
+        "average_kinetic_energy": float(np.average(kes, weights=w)),
+        "average_root_stress": float(np.average(rss, weights=w)),
+        "bilateral_symmetry_index": float(np.average(syms, weights=w)),
+        "average_lower_limb_ke": float(np.average(ll_kes, weights=w)),
+        "angular_jerk_index": float(np.average(ang_jerks, weights=w)),
+        "head_stability_index": float(np.average(head_stabs, weights=w)),
+        "average_com_velocity": float(np.average(com_vels, weights=w)),
+        "elbow_rom": float(metrics[-1].get('_elbow_rom', 0)) if metrics else 0.0,
+        "knee_rom": float(metrics[-1].get('_knee_rom', 0)) if metrics else 0.0,
+        "variability_index": variability_index,
+        "cs_risk_score": cs_risk_score,
+        "average_frame_confidence": float(np.mean(visibilities)),
+        "low_confidence_frame_ratio": float(sum(1 for v in visibilities if v < 0.5) / max(1, len(visibilities))),
+        "backend_source": source,
+    }
+    if extra:
+        biomarkers.update(extra)
+    return biomarkers
+
+
+def build_complete_report(biomarkers: Dict[str, Any], gemini_report: Dict[str, Any],
+                          metrics: List[Dict[str, Any]],
+                          posture: Optional[Dict[str, Any]] = None,
+                          seizure: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Build a complete AnalysisReport-shaped dict from biomarkers + Gemini output + timeline."""
+    raw_data = build_raw_data(biomarkers, posture=posture, seizure=seizure)
+    return {
+        "classification": gemini_report.get("classification", "Normal"),
+        "confidence": gemini_report.get("confidence", 50),
+        "seizureDetected": gemini_report.get("seizureDetected", False),
+        "seizureType": gemini_report.get("seizureType", "None"),
+        "differentialAlert": gemini_report.get("differentialAlert"),
+        "rawData": raw_data,
+        "clinicalAnalysis": gemini_report.get("clinicalAnalysis", gemini_report.get("reasoning", "")),
+        "recommendations": gemini_report.get("recommendations", []),
+        "timelineData": metrics,
+    }
+
+
 def generate_gemini_report(biomarkers: Dict[str, Any]):
     """Sends biomarkers to Gemini for clinical classification."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
@@ -277,47 +356,57 @@ Your task is to analyze the provided BIOMARKER DATA (extracted from video) and g
 
 1. **NEONATAL ENCEPHALOPATHY (Modified Sarnat Score)**:
    - **Normal:** Alert, flexed posture, normal tone, smooth movements.
-     - Markers: Moderate-High Entropy (0.3-0.6), Low Jerk (4-7), Moderate Fractal Dimension.
+     - Markers: Moderate-High Entropy (0.3-0.6), Low Jerk (4-7), Moderate Fractal Dimension, Bilateral Symmetry >0.7, Good Head Stability (<2.0), Active Lower Limbs.
    - **Sarnat Stage I (Mild):** Hyperalert, stare, JITTERINESS, hyper-reflexia.
-     - Markers: HIGH Jerk (>8.0), HIGH Kinetic Energy, High Frequency movements.
+     - Markers: HIGH Jerk (>8.0), HIGH Kinetic Energy, High Angular Jerk, High Frequency movements.
    - **Sarnat Stage II (Moderate):** Lethargic/obtunded, HYPOTONIC (Frog-leg/Extended).
-     - Markers: LOW Entropy (<0.3), LOW Kinetic Energy, Low Fractal Dimension (<1.2).
+     - Markers: LOW Entropy (<0.3), LOW Kinetic Energy, Low Fractal Dimension (<1.2), Poor Bilateral Symmetry (<0.5), Poor Head Stability (>4.0), Low Lower Limb KE, Restricted ROM.
    - **Sarnat Stage III (Severe):** Comatose/stuporous, FLACCID tone.
-     - Markers: NEAR-ZERO Entropy (<0.1), ZERO Kinetic Energy, Minimal movement.
+     - Markers: NEAR-ZERO Entropy (<0.1), ZERO Kinetic Energy, Minimal movement, Near-zero CoM velocity.
 
 2. **SEIZURE CLASSIFICATION RULES (STRICT - ILAE 2021)**:
    - **Clonic Seizure:** Rhythmic jerking in seizure band (1.5-5 Hz), high jerk with regularity.
-     - Markers: Very HIGH Jerk (>10), moderate-high entropy with periodic pattern.
+     - Markers: Very HIGH Jerk (>10), HIGH Angular Jerk, LOW Bilateral Symmetry (lateralized), moderate-high entropy with periodic pattern.
    - **Tonic Seizure:** Sustained body stiffness, high root stress.
-     - Markers: LOW Entropy with HIGH Root Stress, elevated kinetic energy plateau.
+     - Markers: LOW Entropy with HIGH Root Stress, elevated kinetic energy plateau, Poor Head Stability, restricted ROM.
    - **Myoclonic Seizure:** Shock-like, isolated high-jerk events without sustained rhythm.
-     - Markers: Extreme jerk spikes, low average but high peak entropy.
+     - Markers: Extreme jerk spikes, low average but high peak entropy, brief asymmetry.
 
 3. **DIFFERENTIAL DIAGNOSIS (MIMICS)**:
-   - **Jitteriness vs Seizure:** Jitteriness = High Frequency (>5Hz), stimulus-sensitive, NO eye deviation.
+   - **Jitteriness vs Seizure:** Jitteriness = High Frequency (>5Hz), stimulus-sensitive, NO eye deviation, usually SYMMETRIC (high bilateral symmetry).
    - **Normal vs Sarnat I:** Both can have moderate entropy. Key differentiator: Sarnat I has jerk >8 and hyperkinetic energy.
+   - **Asymmetry Alert:** Bilateral Symmetry <0.4 warrants investigation for focal pathology.
 
 ### BIOMARKER REFERENCE RANGES:
 - **Sample Entropy:** 0.3-0.6 = normal variability, >0.7 = dysregulated/chaotic, <0.2 = overly rigid/suppressed
 - **Jerk (fluency):** 4-7 = normal smooth movement, >8 = jerky/uncoordinated, <3 = hypokinetic/absent
 - **Fractal Dimension:** 1.3-1.7 = normal complexity, <1.2 = low complexity (suppressed), >1.8 = chaotic
-- **Kinetic Energy:** Relative measure of movement vigor. Near-zero = minimal/absent movement.
-- **Root Stress:** Body stability metric. High = sustained postural deviation or stiffness.
-- Normal infant baselines: entropy ~0.4+/-0.15, jerk ~5.5+/-1.5
+- **Kinetic Energy:** Total body KE (upper + lower limbs). Near-zero = minimal/absent movement.
+- **Root Stress:** Hip midpoint velocity. High = sustained postural deviation or stiffness.
+- **Bilateral Symmetry Index:** 0.7-1.0 = normal symmetric movement, <0.5 = concerning asymmetry (lateralized pathology)
+- **Lower Limb KE:** Leg kinetic energy. Near-zero with active upper limbs = upper/lower dissociation.
+- **Angular Jerk Index:** Smoothness of elbow joint rotations. High = jerky angular motion.
+- **Head Stability Index:** Nose velocity relative to shoulders. <2.0 = good head control, >4.0 = poor head control/hypotonia.
+- **CoM Velocity:** Whole-body center of mass velocity. Overall movement vigor.
+- **Elbow/Knee ROM:** Joint range of motion in degrees. Low = restricted, high = full/excessive range.
+- **Frame Confidence:** Average pose detection confidence across all frames. Low values (<0.7) indicate poor video quality, occlusion, or unreliable keypoints — reduce diagnostic confidence accordingly.
+- **Low Confidence Ratio:** Fraction of frames with avg visibility < 0.5. High values (>0.3) mean many unreliable frames.
+- **Variability Index:** Standard deviation of entropy over time. High values indicate irregular movement patterns.
+- Normal infant baselines: entropy ~0.4+/-0.15, jerk ~5.5+/-1.5, symmetry ~0.8+/-0.1
 
 ### FEW-SHOT EXAMPLES:
 
 Example 1 - Normal:
-Input: {"average_sample_entropy": 0.42, "average_jerk": 5.1, "average_fractal_dimension": 1.45, "average_kinetic_energy": 3.2, "average_root_stress": 0.8}
-Output: {"classification": "Normal", "confidence": 88, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "All biomarkers within normal ranges. Entropy of 0.42 indicates healthy movement variability. Jerk of 5.1 suggests smooth, coordinated motion. Fractal dimension 1.45 shows normal movement complexity.", "recommendations": ["Continue routine monitoring"]}
+Input: {"average_sample_entropy": 0.42, "average_jerk": 5.1, "average_fractal_dimension": 1.45, "average_kinetic_energy": 3.2, "average_root_stress": 0.8, "bilateral_symmetry_index": 0.82, "average_lower_limb_ke": 1.4, "angular_jerk_index": 450, "head_stability_index": 1.2, "average_com_velocity": 2.1, "elbow_rom": 65, "knee_rom": 55}
+Output: {"classification": "Normal", "confidence": 88, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "All biomarkers within normal ranges. Entropy of 0.42 indicates healthy movement variability. Bilateral symmetry 0.82 shows coordinated L/R movement. Lower limb KE 1.4 confirms active leg movement. Head stability 1.2 indicates good head control.", "recommendations": ["Continue routine monitoring"]}
 
 Example 2 - Sarnat Stage II:
-Input: {"average_sample_entropy": 0.18, "average_jerk": 2.1, "average_fractal_dimension": 1.1, "average_kinetic_energy": 0.5, "average_root_stress": 0.3}
-Output: {"classification": "Sarnat Stage II", "confidence": 82, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "Low entropy (0.18) indicates suppressed, overly rigid movement pattern. Hypokinetic jerk (2.1) and low kinetic energy (0.5) suggest lethargy/obtundation consistent with moderate HIE.", "recommendations": ["Recommend continuous EEG monitoring", "Consider MRI within 24-72 hours", "Assess for therapeutic hypothermia eligibility"]}
+Input: {"average_sample_entropy": 0.18, "average_jerk": 2.1, "average_fractal_dimension": 1.1, "average_kinetic_energy": 0.5, "average_root_stress": 0.3, "bilateral_symmetry_index": 0.55, "average_lower_limb_ke": 0.1, "angular_jerk_index": 80, "head_stability_index": 4.5, "average_com_velocity": 0.4, "elbow_rom": 20, "knee_rom": 15}
+Output: {"classification": "Sarnat Stage II", "confidence": 82, "seizureDetected": false, "seizureType": "None", "differentialAlert": null, "clinicalAnalysis": "Low entropy (0.18) with poor bilateral symmetry (0.55) indicate suppressed, asymmetric movement. Near-zero lower limb KE (0.1) and restricted ROM (elbow 20deg, knee 15deg) suggest hypotonia. Poor head stability (4.5) consistent with lethargy/obtundation in moderate HIE.", "recommendations": ["Recommend continuous EEG monitoring", "Consider MRI within 24-72 hours", "Assess for therapeutic hypothermia eligibility"]}
 
 Example 3 - Seizures (Clonic):
-Input: {"average_sample_entropy": 0.75, "average_jerk": 12.3, "average_fractal_dimension": 1.6, "average_kinetic_energy": 8.1, "average_root_stress": 2.5}
-Output: {"classification": "Seizures", "confidence": 76, "seizureDetected": true, "seizureType": "Clonic", "differentialAlert": null, "clinicalAnalysis": "Very high jerk (12.3) with elevated entropy (0.75) and high kinetic energy (8.1) indicate rhythmic jerking consistent with clonic seizure activity. High root stress (2.5) suggests sustained postural involvement.", "recommendations": ["Urgent EEG correlation required", "Consider IV phenobarbital", "Continuous video-EEG monitoring"]}
+Input: {"average_sample_entropy": 0.75, "average_jerk": 12.3, "average_fractal_dimension": 1.6, "average_kinetic_energy": 8.1, "average_root_stress": 2.5, "bilateral_symmetry_index": 0.35, "average_lower_limb_ke": 5.2, "angular_jerk_index": 2800, "head_stability_index": 5.1, "average_com_velocity": 6.3, "elbow_rom": 110, "knee_rom": 95}
+Output: {"classification": "Seizures", "confidence": 76, "seizureDetected": true, "seizureType": "Clonic", "differentialAlert": null, "clinicalAnalysis": "Very high jerk (12.3) with elevated angular jerk (2800) and poor bilateral symmetry (0.35) indicate lateralized rhythmic jerking consistent with clonic seizure. High lower limb KE (5.2) shows leg involvement. Poor head stability (5.1) and excessive ROM suggest uncontrolled movement.", "recommendations": ["Urgent EEG correlation required", "Consider IV phenobarbital", "Continuous video-EEG monitoring"]}
 
 **REQUIRED OUTPUT FORMAT (strict JSON):**
 {
@@ -413,47 +502,26 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
     """Endpoint for frontend to send keypoints for Physics Processing + Gemini."""
     print(f"Received {len(request.frames)} frames for analysis")
 
-    metrics = process_frames(request.frames, request.config.model_dump())
+    metrics, posture, seizure = process_frames(request.frames, request.config.model_dump())
 
     if not metrics:
-        return {
-            "metrics": [],
-            "biomarkers": {"error": "Insufficient motion data extracted"},
-            "report": {}
-        }
+        return {"metrics": [], "report": {"classification": "Normal", "confidence": 0,
+                "clinicalAnalysis": "Insufficient motion data extracted", "recommendations": []}}
 
-    ents = [m.get('entropy', 0) for m in metrics]
-    jerks = [m.get('fluency_jerk', 0) for m in metrics]
-    fractals = [m.get('fractal_dim', 0) for m in metrics]
-    kes = [m.get('kinetic_energy', 0) for m in metrics]
-    rss = [m.get('root_stress', 0) for m in metrics]
-
-    if not ents:
-        return {"error": "No entropy data", "metrics": metrics}
-
-    biomarkers = {
-        "average_sample_entropy": float(np.mean(ents)),
-        "peak_sample_entropy": float(np.max(ents)),
-        "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
-        "average_fractal_dimension": float(np.mean(fractals)),
-        "peak_fractal_dimension": float(np.max(fractals)),
-        "average_kinetic_energy": float(np.mean(kes)),
-        "average_root_stress": float(np.mean(rss)),
-        "backend_source": "Python/YOLO26-Pipeline"
-    }
-
-    report = generate_gemini_report(biomarkers)
+    biomarkers = aggregate_biomarkers(metrics)
+    gemini_report = generate_gemini_report(biomarkers)
+    report = build_complete_report(biomarkers, gemini_report, metrics, posture=posture, seizure=seizure)
 
     entry_id = log_analysis_result(
         biomarkers=biomarkers,
-        gemini_response=report,
+        gemini_response=gemini_report,
         ground_truth=None,
         metadata={"source": "frontend_mediapipe", "frame_count": len(request.frames)},
         first_frame_skeleton=request.frames[0] if request.frames else None,
         timeline_data=metrics,
     )
 
-    return {"metrics": metrics, "biomarkers": biomarkers, "report": report, "entry_id": entry_id}
+    return {"report": report, "metrics": metrics, "entry_id": entry_id}
 
 
 @app.post("/upload_video")
@@ -481,55 +549,32 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
             )
 
         if len(skeleton_frames) < 10:
-            return {
-                "metrics": [], "biomarkers": {"error": "Insufficient pose data from video"},
-                "report": {"error": "Too few valid frames"}, "frames_processed": len(skeleton_frames)
-            }
+            return {"metrics": [], "report": {"classification": "Normal", "confidence": 0,
+                    "clinicalAnalysis": "Insufficient pose data from video", "recommendations": []},
+                    "frames_processed": len(skeleton_frames)}
 
-        metrics = process_frames(skeleton_frames, config.model_dump())
+        metrics, posture, seizure = process_frames(skeleton_frames, config.model_dump())
         if not metrics:
-            return {
-                "metrics": [], "biomarkers": {"error": "Physics engine returned no metrics"},
-                "report": {}, "frames_processed": len(skeleton_frames)
-            }
+            return {"metrics": [], "report": {"classification": "Normal", "confidence": 0,
+                    "clinicalAnalysis": "Physics engine returned no metrics", "recommendations": []},
+                    "frames_processed": len(skeleton_frames)}
 
-        ents = [m.get('entropy', 0) for m in metrics]
-        jerks = [m.get('fluency_jerk', 0) for m in metrics]
-        fractals = [m.get('fractal_dim', 0) for m in metrics]
-        kes = [m.get('kinetic_energy', 0) for m in metrics]
-        rss = [m.get('root_stress', 0) for m in metrics]
-        biomarkers = {
-            "average_sample_entropy": float(np.mean(ents)),
-            "peak_sample_entropy": float(np.max(ents)),
-            "average_jerk": float(np.mean(jerks)) if jerks else 0.0,
-            "average_fractal_dimension": float(np.mean(fractals)),
-            "peak_fractal_dimension": float(np.max(fractals)),
-            "average_kinetic_energy": float(np.mean(kes)),
-            "average_root_stress": float(np.mean(rss)),
-            "backend_source": "Python/YOLO26-Pipeline",
-            "frames_processed": len(skeleton_frames)
-        }
-
-        report = generate_gemini_report(biomarkers)
+        biomarkers = aggregate_biomarkers(metrics, extra={"frames_processed": len(skeleton_frames)})
+        gemini_report = generate_gemini_report(biomarkers)
+        report = build_complete_report(biomarkers, gemini_report, metrics, posture=posture, seizure=seizure)
 
         entry_id = log_analysis_result(
             biomarkers=biomarkers,
-            gemini_response=report,
+            gemini_response=gemini_report,
             ground_truth=None,
-            metadata={
-                "source": "video_upload",
-                "filename": file.filename,
-                "frames_processed": len(skeleton_frames)
-            },
+            metadata={"source": "video_upload", "filename": file.filename,
+                      "frames_processed": len(skeleton_frames)},
             first_frame_skeleton=skeleton_frames[0] if skeleton_frames else None,
             timeline_data=metrics,
         )
 
-        return {
-            "metrics": metrics, "biomarkers": biomarkers,
-            "report": report, "frames_processed": len(skeleton_frames),
-            "entry_id": entry_id,
-        }
+        return {"report": report, "metrics": metrics,
+                "frames_processed": len(skeleton_frames), "entry_id": entry_id}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -560,12 +605,8 @@ def health_check():
 
 @app.get("/")
 def root():
-    """Serve frontend index.html if built, otherwise show API status."""
-    dist_dir = os.path.join(os.path.dirname(__file__), '..', 'dist')
-    index_path = os.path.join(dist_dir, 'index.html')
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "Neuromotion AI Backend is Running. Run 'python app.py' to build and serve the frontend."}
+    """API status endpoint."""
+    return {"message": "Neuromotion AI Backend is Running. Use 'python app.py' for the Streamlit UI."}
 
 
 @app.post("/refine_config")
@@ -958,10 +999,8 @@ async def compare_stats(request: CompareStatsRequest):
     return stats
 
 
-@app.post("/compare/automated_report")
-async def compare_automated_report(request: AutomatedReportRequest):
-    """Generate an automated comparison report from dataset statistics."""
-    datasets = request.datasets
+def generate_automated_comparison_report(datasets: List[Dict[str, Any]]) -> str:
+    """Generate an automated comparison report from dataset statistics (sync)."""
     if not datasets:
         return {"report": ""}
 
@@ -1064,24 +1103,13 @@ async def compare_automated_report(request: AutomatedReportRequest):
     lines.append("")
     lines.append("Report generated automatically by NeuroMotion AI.")
 
-    return {"report": "\n".join(lines)}
+    return "\n".join(lines)
 
 
-# ============================================================================
-# STATIC FILE SERVING — mount built frontend (must be LAST)
-# ============================================================================
+@app.post("/compare/automated_report")
+async def compare_automated_report_endpoint(request: AutomatedReportRequest):
+    """API endpoint wrapper for automated comparison report."""
+    text = generate_automated_comparison_report(request.datasets)
+    return {"report": text}
 
-_dist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'dist')
 
-if os.path.isdir(_dist_dir):
-    # Serve static assets (JS, CSS, images) from /assets/
-    app.mount("/assets", StaticFiles(directory=os.path.join(_dist_dir, "assets")), name="static-assets")
-
-    # SPA catch-all: any unmatched GET route serves index.html
-    @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str):
-        # Try to serve a static file first (e.g. favicon.ico, vite.svg)
-        file_path = os.path.join(_dist_dir, full_path)
-        if full_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(_dist_dir, "index.html"))

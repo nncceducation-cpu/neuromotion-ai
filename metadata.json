@@ -1,7 +1,0 @@
-{
-  "name": "NeuroMotion AI with comparison (Research)",
-  "description": "A comprehensive infant motor assessment system for General Movements (GMA), Sarnat HIE Staging, and Seizure Detection using Computer Vision and Gemini AI.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}

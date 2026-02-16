@@ -148,8 +148,13 @@ def process_video(
     video_path: str,
     target_fps: float = 10.0,
     det_score_threshold: float = 0.5,
-) -> List[Dict[str, Any]]:
-    """Full pipeline: video -> frames -> YOLO26 detection+pose -> SkeletonFrames."""
+    output_video_path: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Full pipeline: video -> frames -> YOLO26 detection+pose -> SkeletonFrames.
+
+    If output_video_path is provided, writes an annotated MP4 with skeleton overlay.
+    Returns (skeleton_frames, output_video_path or None).
+    """
     if not _models_loaded:
         raise RuntimeError("Models not loaded. Call load_models() first.")
 
@@ -158,6 +163,13 @@ def process_video(
         raise ValueError("No frames extracted from video")
 
     import torch
+
+    # Set up video writer for annotated output
+    video_writer = None
+    if output_video_path:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        video_writer = cv2.VideoWriter(output_video_path, fourcc, actual_fps, (width, height))
+        logger.info(f"Writing annotated video to {output_video_path}")
 
     skeleton_frames = []
     dt = 1.0 / actual_fps
@@ -168,6 +180,11 @@ def process_video(
         # YOLO26 does detection + pose in a single forward pass
         results = _model(frame_bgr, verbose=False, conf=det_score_threshold)  # type: ignore[misc]
         result = results[0]
+
+        # Write annotated frame (every frame, to keep video in sync)
+        if video_writer is not None:
+            annotated = result.plot()
+            video_writer.write(annotated)
 
         # Skip if no persons detected
         if result.keypoints is None or len(result.keypoints) == 0:
@@ -195,8 +212,12 @@ def process_video(
         if (i + 1) % 100 == 0:
             logger.info(f"Processed {i + 1}/{len(frames)} frames")
 
+    if video_writer is not None:
+        video_writer.release()
+        logger.info(f"Annotated video saved: {output_video_path}")
+
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     logger.info(f"Pipeline complete: {len(skeleton_frames)} valid frames from {len(frames)} extracted")
-    return skeleton_frames
+    return skeleton_frames, output_video_path if video_writer is not None else None

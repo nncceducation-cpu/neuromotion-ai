@@ -63,8 +63,8 @@ except ImportError:
     YOLO_AVAILABLE = False
     def load_models() -> bool:
         return False
-    def process_video(video_path: str, target_fps: float = 10.0) -> list:
-        return []
+    def process_video(video_path: str, target_fps: float = 10.0) -> tuple:
+        return [], None
     def is_loaded() -> bool:
         return False
 
@@ -581,7 +581,7 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
 
         async with _gpu_semaphore:
             loop = asyncio.get_event_loop()
-            skeleton_frames = await loop.run_in_executor(
+            skeleton_frames, _ = await loop.run_in_executor(
                 None, lambda: process_video(temp_filename, target_fps=10.0)
             )
 

@@ -16,7 +16,7 @@ try:
 except ImportError:
     YOLO_AVAILABLE = False
     def load_models(): return False
-    def process_video(path, target_fps=10.0): return []
+    def process_video(path, target_fps=10.0, output_video_path=None): return [], None
     def is_loaded(): return False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -43,7 +43,14 @@ uploaded = st.file_uploader(
 )
 
 if uploaded:
-    st.video(uploaded)
+    tab_orig, tab_skel = st.tabs(["Original Video", "Skeleton Overlay"])
+    with tab_orig:
+        st.video(uploaded)
+    with tab_skel:
+        if "annotated_video" in st.session_state:
+            st.video(st.session_state.annotated_video, format="video/mp4")
+        else:
+            st.caption("Run analysis to generate skeleton overlay.")
 
 # --- Training Mode: Config & Expert Inputs ---
 config = dict(st.session_state.get("motion_config", {
@@ -111,8 +118,11 @@ if st.button("Run Clinical Analysis", disabled=not can_run, type="primary", use_
 
         # Stage 2: YOLO Pose Estimation
         progress.progress(25, text="Stage 2/4 — YOLO26 Pose Estimation")
+        annotated_path = temp_path + "_skeleton.mp4"
         with st.spinner("Running YOLO26x-Pose..."):
-            skeleton_frames = process_video(temp_path, target_fps=10.0)
+            skeleton_frames, annotated_path = process_video(
+                temp_path, target_fps=10.0, output_video_path=annotated_path,
+            )
 
         if len(skeleton_frames) < 10:
             st.error(f"Only {len(skeleton_frames)} frames extracted. Need at least 10 for analysis.")
@@ -166,6 +176,12 @@ if st.button("Run Clinical Analysis", disabled=not can_run, type="primary", use_
         st.session_state.raw_frames = skeleton_frames
         st.session_state.chart_data = metrics
 
+        # Store annotated video in session for skeleton overlay tab
+        if annotated_path and os.path.exists(annotated_path):
+            with open(annotated_path, "rb") as vf:
+                st.session_state.annotated_video = vf.read()
+            os.remove(annotated_path)
+
         st.success(f"Analysis complete — **{report['classification']}** ({report['confidence']}% confidence)")
 
         # --- Training mode: refine config ---
@@ -201,6 +217,8 @@ Return ONLY a JSON object with the new MotionConfig parameters."""
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+        if "annotated_path" in dir() and annotated_path and os.path.exists(annotated_path):
+            os.remove(annotated_path)
 
 # --- Show Charts (if data exists) ---
 chart_data = st.session_state.get("chart_data", [])

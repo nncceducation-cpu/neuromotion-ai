@@ -8,6 +8,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import time
 import math
@@ -80,11 +81,10 @@ except ImportError:
         return None
 
 # 7. INITIALIZE APP
-app = FastAPI()
 
-# STARTUP: Load YOLO26 Pose model + Gemini cache
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app):
+    """Startup: load YOLO26 Pose model + Gemini context cache."""
     if YOLO_AVAILABLE:
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(None, load_models)
@@ -101,6 +101,10 @@ async def startup_event():
         print(f"Gemini context cache ready: {cache_name}")
     else:
         print("Gemini context cache not initialized (will fall back to full prompt).")
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # GPU semaphore: prevent concurrent inference
 _gpu_semaphore = asyncio.Semaphore(1)
@@ -337,8 +341,10 @@ def build_complete_report(biomarkers: Dict[str, Any], gemini_report: Dict[str, A
     }
 
 
-def generate_gemini_report(biomarkers: Dict[str, Any]):
-    """Sends biomarkers to Gemini for clinical classification."""
+def generate_gemini_report(biomarkers: Dict[str, Any],
+                           posture: Optional[Dict[str, Any]] = None,
+                           seizure: Optional[Dict[str, Any]] = None):
+    """Sends biomarkers + posture/seizure assessments to Gemini for clinical classification."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
 
     if not api_key:
@@ -394,6 +400,21 @@ Your task is to analyze the provided BIOMARKER DATA (extracted from video) and g
 - **Variability Index:** Standard deviation of entropy over time. High values indicate irregular movement patterns.
 - Normal infant baselines: entropy ~0.4+/-0.15, jerk ~5.5+/-1.5, symmetry ~0.8+/-0.1
 
+### POSTURE ASSESSMENT FIELDS (when provided):
+- **tone_label:** "Normal" / "Hypotonic" / "Hypertonic" — physics engine's heuristic classification
+- **frog_leg_score:** 0-1 (higher = more hip abduction / splayed posture, typical of hypotonia)
+- **shoulder_flexion_index / hip_flexion_index:** 0-1 normalized joint angles
+- **sustained_posture_score:** 0-1 (higher = more static/lethargic posture)
+- **arousal_index:** Magnitude of entropy spike above mean (higher = more state changes)
+- **state_transition_probability:** Fraction of frames crossing mean KE (higher = more active state shifts)
+
+### SEIZURE SIGNAL ANALYSIS FIELDS (when provided):
+- **rhythmicity_score:** 0-1, fraction of spectral power in seizure band (1.5-5 Hz). >0.5 = strong rhythmic component
+- **dominant_frequency:** Peak frequency from FFT. 1.5-5 Hz = seizure band, >5 Hz = jitteriness/tremor
+- **stiffness_score:** 0-1, derived from entropy variance. High = rigid/sustained posture
+- **limb_synchrony:** 0-1, cross-correlation of L/R wrist velocities. Low = lateralized, high = bilateral
+- **calculated_type:** Rule-based seizure type from physics engine (Clonic/Tonic/Myoclonic/None) — use as supporting evidence
+
 ### FEW-SHOT EXAMPLES:
 
 Example 1 - Normal:
@@ -427,11 +448,27 @@ Output: {"classification": "Seizures", "confidence": 76, "seizureDetected": true
 - recommendations must be an array of strings
 """
 
+        posture_block = ""
+        if posture:
+            posture_block = f"""
+**POSTURE ASSESSMENT (physics engine):**
+{json.dumps(posture, indent=2)}
+"""
+
+        seizure_block = ""
+        if seizure:
+            seizure_block = f"""
+**SEIZURE SIGNAL ANALYSIS (FFT-derived from wrist kinematics):**
+{json.dumps(seizure, indent=2)}
+Note: 'calculated_type' is the physics engine's rule-based seizure classification.
+Use it as supporting evidence alongside the biomarkers, not as ground truth.
+"""
+
         user_query = f"""{analysis_instructions}
 
 **NOW ANALYZE THIS CASE:**
-Input: {json.dumps(biomarkers, indent=2)}
-"""
+Biomarkers: {json.dumps(biomarkers, indent=2)}
+{posture_block}{seizure_block}"""
 
         cache_name = get_cache_name()
         if cache_name:
@@ -509,7 +546,7 @@ async def analyze_frames_endpoint(request: AnalysisRequest):
                 "clinicalAnalysis": "Insufficient motion data extracted", "recommendations": []}}
 
     biomarkers = aggregate_biomarkers(metrics)
-    gemini_report = generate_gemini_report(biomarkers)
+    gemini_report = generate_gemini_report(biomarkers, posture=posture, seizure=seizure)
     report = build_complete_report(biomarkers, gemini_report, metrics, posture=posture, seizure=seizure)
 
     entry_id = log_analysis_result(
@@ -560,7 +597,7 @@ async def upload_video_for_pose(file: UploadFile = File(...)):
                     "frames_processed": len(skeleton_frames)}
 
         biomarkers = aggregate_biomarkers(metrics, extra={"frames_processed": len(skeleton_frames)})
-        gemini_report = generate_gemini_report(biomarkers)
+        gemini_report = generate_gemini_report(biomarkers, posture=posture, seizure=seizure)
         report = build_complete_report(biomarkers, gemini_report, metrics, posture=posture, seizure=seizure)
 
         entry_id = log_analysis_result(

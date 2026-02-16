@@ -45,6 +45,8 @@ class SkeletonJoints(BaseModel):
     nose: Optional[Point3D] = None
     left_eye: Optional[Point3D] = None
     right_eye: Optional[Point3D] = None
+    left_ear: Optional[Point3D] = None
+    right_ear: Optional[Point3D] = None
     left_mouth: Optional[Point3D] = None
     right_mouth: Optional[Point3D] = None
     # Upper Body

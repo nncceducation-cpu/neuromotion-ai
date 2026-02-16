@@ -22,8 +22,8 @@ COCO_TO_SKELETON = {
     0: "nose",
     1: "left_eye",
     2: "right_eye",
-    # 3: left_ear  (not in SkeletonFrame)
-    # 4: right_ear (not in SkeletonFrame)
+    3: "left_ear",
+    4: "right_ear",
     5: "left_shoulder",
     6: "right_shoulder",
     7: "left_elbow",

@@ -136,7 +136,7 @@ if st.button("Run Clinical Analysis", disabled=not can_run, type="primary", use_
                 metrics, extra={"frames_processed": len(skeleton_frames)}
             )
             ground_truth = st.session_state.get("expert_diagnosis") if is_training else None
-            gemini_report = generate_gemini_report(biomarkers)
+            gemini_report = generate_gemini_report(biomarkers, posture=posture, seizure=seizure)
             report = build_complete_report(
                 biomarkers, gemini_report, metrics, posture=posture, seizure=seizure
             )

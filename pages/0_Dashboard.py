@@ -69,7 +69,7 @@ with left_col:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([0.5, 3, 2, 1.5])
                 with c1:
-                    checked = st.checkbox("", value=report["id"] in selected_ids, key=f"sel_{i}", label_visibility="collapsed")
+                    checked = st.checkbox("Select", value=report["id"] in selected_ids, key=f"sel_{i}", label_visibility="collapsed")
                     if checked:
                         selected_ids.add(report["id"])
                     else:

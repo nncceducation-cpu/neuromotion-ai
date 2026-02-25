@@ -8,7 +8,7 @@ import os
 import cv2
 import numpy as np
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,7 @@ def process_video(
     target_fps: float = 10.0,
     det_score_threshold: float = 0.5,
     output_video_path: Optional[str] = None,
+    frame_callback: Optional[Callable[[np.ndarray, int, int], None]] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Full pipeline: video -> frames -> YOLO26 detection+pose -> SkeletonFrames.
 
@@ -182,9 +183,14 @@ def process_video(
         result = results[0]
 
         # Write annotated frame (every frame, to keep video in sync)
+        annotated = result.plot()
         if video_writer is not None:
-            annotated = result.plot()
             video_writer.write(annotated)
+
+        # Send annotated frame to callback for live preview (every 3rd frame)
+        if frame_callback is not None and i % 3 == 0:
+            annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+            frame_callback(annotated_rgb, i, len(frames))
 
         # Skip if no persons detected
         if result.keypoints is None or len(result.keypoints) == 0:

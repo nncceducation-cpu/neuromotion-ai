@@ -27,6 +27,7 @@ from models import (
     TrajectoryRequest, CompareAIReportRequest, CompareChatRequest,
     CompareStatsRequest, AutomatedReportRequest,
     AnalysisRequest, RefineConfigRequest, ValidationRequest,
+    CaseSearchRequest,
 )
 
 # 3. IMPORT: Storage service
@@ -44,6 +45,9 @@ except ImportError:
     except ImportError:
         print("CRITICAL WARNING: 'physics_engine.py' not found. Ensure it is in the server/ directory.")
         process_frames = lambda frames, config: []
+
+# 5b. IMPORT: Case search engine
+import case_search
 
 # 6. AI SDK IMPORT
 try:
@@ -897,6 +901,40 @@ async def get_learned_stats(user_id: str):
         cat = (e.get("expert_correction") or {}).get("correctClassification") or e.get("ground_truth", "Unknown")
         by_category[cat] = by_category.get(cat, 0) + 1
     return {"totalLearned": len(corrections), "breakdown": by_category}
+
+
+# ============================================================================
+# CASE SEARCH ENDPOINT
+# ============================================================================
+
+@app.post("/search_cases")
+async def search_cases(request: CaseSearchRequest):
+    """Search and filter previous analysis cases.
+
+    Supports text search, classification filtering, date ranges,
+    biomarker range filtering, validation status, and similarity search.
+    """
+    results = case_search.search(
+        query=request.query,
+        classifications=request.classifications,
+        date_start=request.date_start,
+        date_end=request.date_end,
+        biomarker_filters=request.biomarker_filters,
+        validated_only=request.validated_only,
+        similar_to=request.similar_to,
+        top_k=request.top_k,
+        method=request.method,
+    )
+
+    # Transform to frontend-friendly report format
+    reports = [_jsonl_entry_to_report(r) for r in results]
+
+    # Preserve similarity scores if present
+    for i, r in enumerate(results):
+        if "_similarity_score" in r:
+            reports[i]["similarityScore"] = r["_similarity_score"]
+
+    return {"results": reports, "total": len(reports)}
 
 
 # ============================================================================

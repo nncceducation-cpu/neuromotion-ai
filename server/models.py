@@ -260,3 +260,15 @@ class ValidationRequest(BaseModel):
     timestamp: str
     ground_truth_classification: str
     doctor_notes: Optional[str] = None
+
+
+class CaseSearchRequest(BaseModel):
+    query: Optional[str] = None
+    classifications: Optional[List[str]] = None
+    date_start: Optional[str] = None
+    date_end: Optional[str] = None
+    biomarker_filters: Optional[Dict[str, Dict[str, float]]] = None
+    validated_only: Optional[bool] = None
+    similar_to: Optional[Dict[str, float]] = None
+    top_k: int = 50
+    method: str = "cosine"

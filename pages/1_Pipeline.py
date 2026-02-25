@@ -43,14 +43,10 @@ uploaded = st.file_uploader(
 )
 
 if uploaded:
-    tab_orig, tab_skel = st.tabs(["Original Video", "Skeleton Overlay"])
-    with tab_orig:
+    if "annotated_video" in st.session_state:
+        st.video(st.session_state.annotated_video, format="video/mp4")
+    else:
         st.video(uploaded)
-    with tab_skel:
-        if "annotated_video" in st.session_state:
-            st.video(st.session_state.annotated_video, format="video/mp4")
-        else:
-            st.caption("Run analysis to generate skeleton overlay.")
 
 # --- Training Mode: Config & Expert Inputs ---
 config = dict(st.session_state.get("motion_config", {
@@ -119,10 +115,24 @@ if st.button("Run Clinical Analysis", disabled=not can_run, type="primary", use_
         # Stage 2: YOLO Pose Estimation
         progress.progress(25, text="Stage 2/4 — YOLO26 Pose Estimation")
         annotated_path = temp_path + "_skeleton.mp4"
-        with st.spinner("Running YOLO26x-Pose..."):
-            skeleton_frames, annotated_path = process_video(
-                temp_path, target_fps=10.0, output_video_path=annotated_path,
-            )
+
+        st.markdown("**Live Skeleton Preview**")
+        live_frame = st.empty()
+        frame_counter = st.empty()
+
+        def on_frame(annotated_rgb, frame_idx, total_frames):
+            live_frame.image(annotated_rgb, channels="RGB", use_container_width=True)
+            pct = 25 + int((frame_idx / max(total_frames, 1)) * 25)
+            frame_counter.caption(f"Frame {frame_idx + 1} / {total_frames}")
+            progress.progress(pct, text=f"Stage 2/4 — YOLO26 Pose Estimation ({frame_idx + 1}/{total_frames})")
+
+        skeleton_frames, annotated_path = process_video(
+            temp_path, target_fps=10.0, output_video_path=annotated_path,
+            frame_callback=on_frame,
+        )
+
+        live_frame.empty()
+        frame_counter.empty()
 
         if len(skeleton_frames) < 10:
             st.error(f"Only {len(skeleton_frames)} frames extracted. Need at least 10 for analysis.")
